@@ -489,7 +489,10 @@ function relayPlans(){
       extras.get(url).add(pk);
     }
   }
-  const ranked = [...extras].sort((a,b) => b[1].size - a[1].size).slice(0,8);
+  // Own publication relays take priority when the extra socket budget is full.
+  const ranked = [...extras].sort((a,b) =>
+    Number(b[1].has(session.pk)) - Number(a[1].has(session.pk)) ||
+    b[1].size - a[1].size).slice(0,8);
   return [...primary.map(url => ({url,authors:authors.slice()})),
     ...ranked.map(([url,authors]) => ({url,authors:[...authors]}))];
 }

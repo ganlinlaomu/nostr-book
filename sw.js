@@ -1,4 +1,4 @@
-const CACHE = 'book-v7';
+const CACHE = 'book-v8';
 const SHELL = ['./', 'index.html', 'manifest.json', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
@@ -16,7 +16,7 @@ self.addEventListener('fetch', e => {
   }
   // 页面：先联网，断网时用缓存
   if (u.origin === location.origin) {
-    e.respondWith(fetch(e.request).then(r => { caches.open(CACHE).then(c => c.put(e.request, r.clone())); return r; })
+    e.respondWith(fetch(e.request, { cache: 'no-cache' }).then(r => { caches.open(CACHE).then(c => c.put(e.request, r.clone())); return r; })
       .catch(() => caches.match(e.request).then(r => r || caches.match('index.html'))));
   }
 });

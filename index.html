@@ -487,7 +487,13 @@ function after(){
   if (session && !session.demo && pages[idx].anchor) LS.set('book.mark', pages[idx].anchor);
   if (session && idx > 0 && idx >= pages.length - 4) loadMore().then(() => { if (pages[idx]) document.getElementById('where').textContent = idx === 0 ? '封面' : '第 ' + cn(idx) + ' 页'; });
 }
-function show(i){ if (curEl) curEl.remove(); idx = i; curEl = render(i); mount(curEl); after(); }
+// 直接换页：先打断进行中的翻页动画，清掉书里所有旧页，免得有一张旧页（比如封面）压在上面
+let turnNo = 0;
+function show(i){
+  turnNo++; busy = false;
+  book.querySelectorAll('.page:not(.measure)').forEach(e => e.remove());
+  idx = i; curEl = render(i); mount(curEl); after();
+}
 let toastT;
 function toast(m){ toastEl.textContent = m; toastEl.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => toastEl.hidden = true, 1800); }
 function go(dir){
@@ -501,7 +507,8 @@ function go(dir){
   }
   busy = true; bar.hidden = true;
   const next = render(j), old = curEl;
-  const done = () => { old.remove(); next.className = 'page'; curEl = next; idx = j; busy = false; after(); };
+  const my = ++turnNo;
+  const done = () => { if (my !== turnNo) return; old.remove(); next.className = 'page'; curEl = next; idx = j; busy = false; after(); };
   if (reduce){ next.classList.add('fade-in'); mount(next); setTimeout(done, 260); return; }
   if (dir > 0){ next.classList.add('under'); book.insertBefore(next, old); old.classList.add('turn-out'); }
   else { next.classList.add('turn-in'); mount(next); old.classList.add('under-back'); }

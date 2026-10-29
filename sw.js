@@ -1,4 +1,4 @@
-const CACHE = 'book-v16';
+const CACHE = 'book-v17';
 const SHELL = ['./', 'index.html', 'writer.js', 'vendor/noble-secp256k1.js', 'manifest.json', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', e => {

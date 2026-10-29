@@ -291,6 +291,8 @@ async function signAndSend(){
     if(pk!==activePk)return;
     const ok=result.filter(r=>r.ok).length;
     if(!ok)throw Error('未收到 Relay 接受确认；草稿保留。若网络不稳定，请先检查是否已发布，避免重复发帖');
+    // The event has been accepted; display it immediately without waiting for relay echo.
+    window.dispatchEvent(new CustomEvent('nostr-book:published', {detail:event}));
     await draftIO(pk,'');
     editor.value='';saveHint.textContent='草稿已清空';
     showStatus('发表成功 · '+ok+' 个 Relay 已接收');

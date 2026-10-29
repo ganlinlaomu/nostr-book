@@ -1,4 +1,4 @@
-# nostr-book
+# YISHU
 
 驿书 — read nostr posts like reading a book
 

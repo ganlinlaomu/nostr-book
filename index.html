@@ -336,7 +336,7 @@ function groupDays(posts){
 async function fetchBatch(){
   if (session.demo) { const evs = demoEvents.filter(e => e.created_at <= cursor); cursor = 0; return evs; }
   const now = Math.floor(Date.now() / 1000) + 600;
-  const res = await Promise.all(chunk(follows, 250).map(a => query([{ kinds:[1], authors:a, until:cursor, limit:150 }])));
+  const res = await Promise.all(chunk(follows, 250).map(a => query([{ kinds:[1], authors:a, until:cursor, limit:150 }], 8000)));
   const all = new Map(); let edge = 0, minAll = Infinity;
   res.forEach(list => {
     const ok = list.filter(e => e.created_at <= now);
@@ -356,7 +356,8 @@ async function loadMore(){
   try {
     let added = 0;
     for (let round = 0; round < 5 && !added; round++){
-      const evs = (await fetchBatch()).filter(e => !seen.has(e.id));
+      let evs = (await fetchBatch()).filter(e => !seen.has(e.id));
+      if (!evs.length && pages.length <= 1 && !session.demo) evs = (await fetchBatch()).filter(e => !seen.has(e.id));  // 第一批空了多半是网络抖动，再试一次
       if (!evs.length){ exhausted = true; break; }
       evs.forEach(e => seen.add(e.id));
       const posts = evs.map(clean).filter(Boolean);
@@ -490,12 +491,15 @@ async function start(pk, demo = false){
   if (demo){ buildDemo(); readerName = '示例读者'; }
   else {
     relayReached = false;
-    const c = await query([{ kinds:[3], authors:[pk], limit:3 }]);
+    // 关注列表（kind 3）各中继收得不全：连同资料中继一起问，没拿到再试一次
+    const ask = () => query([{ kinds:[3], authors:[pk], limit:3 }], 8000, PROFILE_RELAYS);
+    let c = await ask();
+    if (!c.length) c = await ask();
     if (!relayReached){ session = null; coverState = 'login';
       coverError = '连不上中继。在预览里这个页面不能联网，部署到自己的网址后就能用；现在可以先看示例。'; show(0); return; }
     const latest = c.sort((a, b) => b.created_at - a.created_at)[0];
     follows = latest ? [...new Set(latest.tags.filter(t => t[0] === 'p' && /^[0-9a-f]{64}$/.test(t[1])).map(t => t[1]))].filter(x => x !== pk) : [];
-    if (!follows.length){ session = null; coverState = 'login'; coverError = '这个账号还没有关注任何人，书里暂时没有内容。'; show(0); return; }
+    if (!follows.length){ session = null; coverState = 'login'; coverError = c.length ? '这个账号还没有关注任何人，书里暂时没有内容。' : '没从中继取到这个账号的关注列表，可能是网络不稳，请再试一次。'; show(0); return; }
     LS.set('book.pk', pk);
     await ensureNames([pk]); readerName = nameOf(pk);
   }

@@ -276,7 +276,7 @@ async function signAndSend(){
     const lib=await schnorr();
     const actualPk=b2h(lib.getPublicKey(sk));
     if(actualPk!==pk)throw Error('密钥与当前阅读账号不匹配');
-    const event={kind:1,created_at:Math.floor(Date.now()/1000),tags:[],content,pubkey:pk};
+    const event={kind:1,created_at:Math.floor(Date.now()/1000),tags:[['client','驿书']],content,pubkey:pk};
     const canonical=JSON.stringify([0,event.pubkey,event.created_at,event.kind,event.tags,event.content]);
     event.id=b2h(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(canonical))));
     const digest=h2b(event.id);

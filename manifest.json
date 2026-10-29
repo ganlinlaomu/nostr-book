@@ -1,6 +1,6 @@
 {
-  "name": "YISHU",
-  "short_name": "YISHU",
+  "name": "驿书",
+  "short_name": "驿书",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -166,7 +166,7 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
     <p class="writer-meta" id="writerSaved" aria-live="polite">草稿保存在本机</p>
     <section class="writer-panel" id="writerSetup" hidden>
       <h3>第一次发表 · 设置加密私钥</h3>
-      <p>输入当前阅读账号的 nsec。私钥在这台设备本地加密，不发送给服务器。请勿在共享设备使用；密码遗失需重新导入私钥。</p>
+      <p>输入当前阅读账号的 nsec。私钥在这台设备本地加密，不发送给 Relay。试用阶段请先使用测试账号，不建议立即导入重要主账号的私钥；密码遗失需重新导入。</p>
       <input id="writerSecret" type="password" placeholder="nsec1… 或 64 位十六进制私钥" autocomplete="off" spellcheck="false" autocapitalize="off" aria-label="Nostr 私钥">
       <input id="writerNewPass" type="password" placeholder="加密密码（至少 12 字符）" autocomplete="new-password" aria-label="设置加密密码">
       <input id="writerNewPassConfirm" type="password" placeholder="再输入一次加密密码" autocomplete="new-password" aria-label="确认加密密码">

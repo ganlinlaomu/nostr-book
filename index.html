@@ -476,12 +476,12 @@ function applyFresh(){
   days.forEach(paginateDay);
   if (exhausted) pages.push({ type:'end' });
   bar.hidden = true;
-  show(prevIndex === 0 ? 0 : prevIndex <= 2 ? Math.min(prevIndex, pages.length - 1) : Math.min(1, pages.length - 1));
+  show(prevIndex <= 2 ? Math.min(Math.max(1,prevIndex), pages.length - 1) : Math.min(1,pages.length - 1));
   saveCache();
   updateDot();
 }
 function queueFresh(events){
-  if (!session || session.demo || !days.length) return;
+  if (!session || session.demo) return;
   const now = Math.floor(Date.now() / 1000) + 600;
   const have = new Set(fresh.map(p => p.id));
   let added = 0;
@@ -505,14 +505,14 @@ function queueFresh(events){
   }, 600);
 }
 async function checkFresh(auto = false){
-  if (!session || session.demo || checking || !days.length || !follows.length ||
+  if (!session || session.demo || checking || !follows.length ||
       document.visibilityState !== 'visible') return;
   const sess = session;
   checking = true;
   lastCheck = Date.now();
   try {
-    const newest = days[0].posts[0].t;
-    const since = Math.max(0, newest - BACKFILL_OVERLAP);
+    const newest = days.length ? days[0].posts[0].t : Math.floor(Date.now()/1000)-FOLLOW_HISTORY;
+    const since = Math.max(0, newest-BACKFILL_OVERLAP);
     const untilNow = Math.floor(Date.now() / 1000) + 600;
     // 每组独立翻页，防止高活跃账号填满 Relay 的 limit 而漏掉其他作者。
     const tasks = [];
@@ -740,7 +740,7 @@ document.getElementById('syncNow').addEventListener('click', async () => {
   if (!updated) { toast('关注列表暂不可用，仍使用本地记录'); return; }
   await refreshRelayHints();
   await checkFresh(true);
-  if (session === current) toast('关注 ' + follows.length + ' 人 · 已检查新动态');
+  if (session === current) toast('关注 ' + follows.length + ' 人 · 已发起动态同步');
 });
 book.addEventListener('click', e => {
   if (e.target.closest('.head .home')) { bar.hidden = true; show(0); }

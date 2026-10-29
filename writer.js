@@ -224,6 +224,7 @@ function closeWriter(){
   showPanel(null);
   secretInput.value='';newPassInput.value='';confirmPassInput.value='';unlockPassInput.value='';
   activePk=null;
+  window.dispatchEvent(new Event('resize'));
 }
 async function importKey(){
   if(opBusy)return;

@@ -135,11 +135,11 @@ async function flushDraft(){
   clearTimeout(saveTimer);saveTimer=null;
   if (!activePk) return;
   const pk=activePk, text=editor.value;
-  try{await draftIO(pk,text);if(pk===activePk)saveHint.textContent='草稿已保存在本机';return true;}
-  catch(e){if(pk===activePk){saveHint.textContent='草稿保存失败';showStatus('本地存储不可用，请先复制文字备份',true);}return false;}
+  try{await draftIO(pk,text);if(pk===activePk)saveHint.textContent='已保存';return true;}
+  catch(e){if(pk===activePk){saveHint.textContent='保存失败';showStatus('本地存储不可用，请先复制文字备份',true);}return false;}
 }
 function scheduleDraft(){
-  saveHint.textContent='正在保存…';
+  saveHint.textContent='保存中…';
   clearTimeout(saveTimer);
   saveTimer=setTimeout(flushDraft,600);
 }
@@ -195,9 +195,7 @@ function setBusy(value){
     b.disabled=value;
 }
 function updateKeyBadge(){
-  const found=!!getVault(activePk);
-  $('writerKeyState').textContent=found?'本机已加密保存签名密钥':'尚未设置签名密钥';
-  importButton.textContent=found?'更换本地私钥':'设置本地私钥';
+  importButton.textContent=getVault(activePk)?'私钥':'设置私钥';
 }
 async function openWriter(){
   if(opBusy)return;
@@ -208,12 +206,12 @@ async function openWriter(){
   updateKeyBadge();
   overlay.hidden=false;
   $('writerPublished').hidden=true;
-  $('writerTitle').textContent='驿书 · 随笔';
+  $('writerTitle').textContent='随笔';
   const generation=draftGeneration;
   try{
     const draft=await draftIO(pk);
     if(generation===draftGeneration && pk===activePk)editor.value=draft;
-    if(generation===draftGeneration){saveHint.textContent='草稿仅保存在这台设备';editor.focus();}
+    if(generation===draftGeneration){saveHint.textContent='已保存';editor.focus();}
   }catch(e){showStatus('本地草稿不可用，请先确认浏览器存储权限',true);}
 }
 function closeWriter(){
@@ -243,7 +241,7 @@ async function importKey(){
     const vault=await encryptSecret(sk,password,pk);
     localStorage.setItem(vaultKey(pk),JSON.stringify(vault));
     showPanel(null);updateKeyBadge();
-    showStatus('签名密钥已在本机加密保存；发表时才需要解锁');
+    showStatus('私钥已加密保存');
   }catch(e){showStatus(e.message||'私钥设置失败',true);}
   finally{
     sk?.fill(0);
@@ -257,9 +255,9 @@ async function publish(){
   if(!content){showStatus('请先写点什么',true);editor.focus();return;}
   if(content.length>MAX_CONTENT){showStatus('正文过长，请保持在 12000 字符以内',true);return;}
   if(!await flushDraft())return;
-  if(!getVault(activePk)){showPanel('setup');showStatus('首次发表，请先设置本地加密私钥');secretInput.focus();return;}
+  if(!getVault(activePk)){showPanel('setup');showStatus('');secretInput.focus();return;}
   if(!navigator.onLine){showStatus('当前离线，草稿已保存；联网后可发表',true);return;}
-  showPanel('unlock');showStatus('输入解锁密码后才会签名发表');unlockPassInput.focus();
+  showPanel('unlock');showStatus('');unlockPassInput.focus();
 }
 async function signAndSend(){
   if(opBusy||!activePk)return;
@@ -286,7 +284,7 @@ async function signAndSend(){
     if(!await lib.verifyAsync(Uint8Array.from(event.sig.match(/../g),x=>parseInt(x,16)),digest,Uint8Array.from(pk.match(/../g),x=>parseInt(x,16))))
       throw Error('本地签名校验失败，未发送');
     sk.fill(0);sk=null;
-    showPanel(null);showStatus('签名完成，正在发送到 Relay…');
+    showPanel(null);showStatus('正在发表…');
     const urls=writeRelays(pk);
     if(!urls.length)throw Error('没有可用的写入 Relay');
     const result=await Promise.all(urls.map(url=>sendRelay(url,event)));
@@ -294,8 +292,8 @@ async function signAndSend(){
     const ok=result.filter(r=>r.ok).length;
     if(!ok)throw Error('未收到 Relay 接受确认；草稿保留。若网络不稳定，请先检查是否已发布，避免重复发帖');
     await draftIO(pk,'');
-    editor.value='';saveHint.textContent='已清空已发表草稿';
-    showStatus('已发表 · '+ok+'/'+result.length+' 个 Relay 确认接收');
+    editor.value='';saveHint.textContent='草稿已清空';
+    showStatus('发表成功 · '+ok+' 个 Relay 已接收');
     $('writerPublished').hidden=false;
   }catch(e){if(pk===activePk)showStatus(e.message||'发表失败，草稿已保留',true);}
   finally{sk?.fill(0);setBusy(false);}
@@ -303,7 +301,7 @@ async function signAndSend(){
 $('writePost').addEventListener('click',openWriter);
 closeButton.addEventListener('click',closeWriter);
 editor.addEventListener('input',scheduleDraft);
-importButton.addEventListener('click',()=>{showPanel('setup');showStatus('私钥只用于本地加密，不发送给 Relay');});
+importButton.addEventListener('click',()=>{showPanel('setup');showStatus('');secretInput.focus();});
 $('writerSaveKey').addEventListener('click',importKey);
 publishButton.addEventListener('click',publish);
 $('writerSend').addEventListener('click',signAndSend);

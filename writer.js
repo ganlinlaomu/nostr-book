@@ -50,9 +50,11 @@ function nsecBytes(value){
   if (values.length < 7 || values.some(i => i < 0)) throw Error('nsec 格式不正确');
   // Bech32 checksum for Nostr NIP-19.
   let chk = 1;
-  for (const ch of 'nsec'){const top=chk>>>25;chk=((chk&0x1ffffff)<<5)^ch.charCodeAt(0);for(let i=0;i<5;i++)if((top>>>i)&1)chk^=[0x3b6a57b2,0x26508e6d,0x1ea119fa,0x3d4233dd,0x2a1462b3][i];}
-  {const top=chk>>>25;chk=((chk&0x1ffffff)<<5);for(let i=0;i<5;i++)if((top>>>i)&1)chk^=[0x3b6a57b2,0x26508e6d,0x1ea119fa,0x3d4233dd,0x2a1462b3][i];}
-  for (const v of values){const top=chk>>>25;chk=((chk&0x1ffffff)<<5)^v;for(let i=0;i<5;i++)if((top>>>i)&1)chk^=[0x3b6a57b2,0x26508e6d,0x1ea119fa,0x3d4233dd,0x2a1462b3][i];}
+  const step=v=>{const top=chk>>>25;chk=((chk&0x1ffffff)<<5)^v;for(let i=0;i<5;i++)if((top>>>i)&1)chk^=[0x3b6a57b2,0x26508e6d,0x1ea119fa,0x3d4233dd,0x2a1462b3][i];};
+  for(const ch of 'nsec')step(ch.charCodeAt(0)>>>5);
+  step(0);
+  for(const ch of 'nsec')step(ch.charCodeAt(0)&31);
+  for (const v of values)step(v);
   if (chk !== 1) throw Error('nsec 校验失败，请检查是否输错');
   let acc=0, bits=0;
   const out=[];
@@ -100,7 +102,8 @@ async function encryptSecret(secret,password,pk){
   return {v:1,pk,iter:KDF_ITERATIONS,salt:b2h(salt),iv:b2h(iv),data:b2h(data)};
 }
 async function decryptSecret(vault,password){
-  const key=await passKey(password,h2b(vault.salt.padEnd(64,'0')).slice(0,16));
+  const salt=Uint8Array.from(vault.salt.match(/../g),x=>parseInt(x,16));
+  const key=await passKey(password,salt);
   const data=Uint8Array.from(vault.data.match(/../g),x=>parseInt(x,16));
   try{
     return new Uint8Array(await crypto.subtle.decrypt(
@@ -204,6 +207,7 @@ async function openWriter(){
   editor.value='';showPanel(null);status.textContent='';
   updateKeyBadge();
   overlay.hidden=false;
+  $('writerPublished').hidden=true;
   $('writerTitle').textContent='驿书 · 随笔';
   const generation=draftGeneration;
   try{

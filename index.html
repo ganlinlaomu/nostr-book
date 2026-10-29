@@ -135,7 +135,7 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
 .writer-note{font-size:11px;color:var(--muted);line-height:1.8}
 .writer-publish{border-color:var(--accent);color:var(--accent);padding-inline:20px}
 .writer-foot button[disabled],.writer-panel button[disabled]{opacity:.5}
-@media (max-width:420px){.writer-paper{gap:12px}.writer-top h2{font-size:12px}.writer-foot{gap:6px}.writer-text{min-height:42vh}}
+@media (max-width:420px){.bar .acts{gap:7px}.bar .link{font-size:11px}.writer-paper{gap:12px}.writer-top h2{font-size:12px}.writer-foot{gap:6px}.writer-text{min-height:42vh}}
 </style>
 
 </head>
@@ -795,7 +795,8 @@ book.addEventListener('pointerup', e => {
   }
 });
 document.addEventListener('keydown', e => {
-  if (e.target.closest && e.target.closest('input')) return;
+  if (!document.getElementById('writerOverlay').hidden) return;
+  if (e.target.closest && e.target.closest('input,textarea')) return;
   if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown'){ e.preventDefault(); go(1); }
   if (e.key === 'ArrowLeft' || e.key === 'PageUp'){ e.preventDefault(); go(-1); }
 });
@@ -899,6 +900,7 @@ async function refreshFollows(pk){
 
 /* 屏幕尺寸或字体变化时重新排版，停在原来那一页 */
 function repaginate(){
+  if (!document.getElementById('writerOverlay').hidden) return;
   if (!days.length) return;
   if (busy){ later(); return; }                                  // 翻页动画中重排会留下一张旧页，等动画结束
   const a = pages[idx] && pages[idx].anchor, ty = pages[idx] && pages[idx].type;

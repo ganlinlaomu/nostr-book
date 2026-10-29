@@ -387,7 +387,7 @@ function updateDot(){
   const h = curEl && curEl.querySelector('.head'); const pg = pages[idx];
   if (h && pg && pg.key) h.lastElementChild.outerHTML = whenHTML(pg.key);
 }
-async function checkFresh(){
+async function checkFresh(auto = false){
   if (!session || session.demo || checking || !days.length || !follows.length) return;
   checking = true; lastCheck = Date.now();
   const sess = session;
@@ -402,7 +402,7 @@ async function checkFresh(){
     await ensureNames(posts.map(p => p.pk));
     if (session !== sess) return;
     fresh = fresh.concat(posts);
-    updateDot();
+    if (auto && idx <= 1) applyFresh(); else updateDot();         // 刚打开、还停在最新页：直接装订进来
   } catch(e){} finally { checking = false; }
 }
 function applyFresh(){
@@ -419,8 +419,14 @@ function applyFresh(){
   bar.hidden = true; show(Math.min(1, pages.length - 1));
   saveCache();
 }
+// 切回前台：离开超过十分钟算“重新打开”，翻回最新页并直接装订新篇章；短暂切走只亮小点
+let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && Date.now() - lastCheck > 120000) checkFresh();
+  if (document.visibilityState === 'hidden'){ hiddenAt = Date.now(); return; }
+  if (!session || session.demo) return;
+  const long = hiddenAt && Date.now() - hiddenAt > 600000;
+  if (long && pages.length > 1 && !busy){ bar.hidden = true; show(1); }
+  if (long || Date.now() - lastCheck > 120000) checkFresh(long);
 });
 setInterval(() => { if (document.visibilityState === 'visible' && Date.now() - lastCheck > 300000) checkFresh(); }, 60000);
 
@@ -484,7 +490,6 @@ function mount(el){ book.insertBefore(el, bar); }
 function after(){
   if (pages[idx].type === 'cover') bindCover(curEl);
   document.getElementById('where').textContent = idx === 0 ? '封面' : '第 ' + cn(idx) + ' 页';
-  if (session && !session.demo && pages[idx].anchor) LS.set('book.mark', pages[idx].anchor);
   if (session && idx > 0 && idx >= pages.length - 4) loadMore().then(() => { if (pages[idx]) document.getElementById('where').textContent = idx === 0 ? '封面' : '第 ' + cn(idx) + ' 页'; });
 }
 // 直接换页：先打断进行中的翻页动画，清掉书里所有旧页，免得有一张旧页（比如封面）压在上面
@@ -567,9 +572,7 @@ async function start(pk, demo = false){
   coverState = 'ready';
   if (idx === 0) show(0);
   if (pages.length > 1){
-    const mark = demo ? null : LS.get('book.mark', null);
-    const at = mark ? pages.findIndex(p => p.anchor === mark && p.type === 'text') : -1;
-    setTimeout(() => { if (at > 1) show(at); else go(1); }, 500);
+    setTimeout(() => { if (idx === 0) go(1); }, 500);
   }
 }
 
@@ -594,10 +597,9 @@ function restore(pk){
   days.forEach(paginateDay);
   if (exhausted) pages.push({ type:'end' });
   readerName = nameOf(pk); coverState = 'ready';
-  const mark = LS.get('book.mark', null);
-  const at = mark ? pages.findIndex(p => p.anchor === mark && p.type === 'text') : -1;
-  show(at > 0 ? at : Math.min(1, pages.length - 1));
-  refreshFollows(pk).then(checkFresh, checkFresh);
+  show(Math.min(1, pages.length - 1));                           // 打开总是从最新一页读起
+  const fresh0 = () => checkFresh(true);
+  refreshFollows(pk).then(fresh0, fresh0);
   return true;
 }
 async function refreshFollows(pk){

@@ -1,6 +1,6 @@
 # YISHU
 
-驿书 — read nostr posts like reading a book
+YISHU — read Nostr posts like reading a book
 
 把 Nostr 关注动态排成一本可以翻页的书来读。纯静态 PWA，无需构建：
 

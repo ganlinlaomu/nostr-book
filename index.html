@@ -127,7 +127,7 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
 (() => {
 'use strict';
 /* ---------- 设置 ---------- */
-const DEFAULT_RELAYS = ['wss://relay.damus.io','wss://nos.lol','wss://relay.primal.net','wss://relay.nostr.band'];
+const DEFAULT_RELAYS = ['wss://relay.damus.io','wss://nos.lol','wss://relay.primal.net'];
 const LS = {
   get(k, d){ try{ const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); }catch(e){ return d; } },
   set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} },
@@ -180,14 +180,14 @@ function toHex(s){
 
 /* ---------- 中继查询 ---------- */
 let relayReached = false;
-function query(filters, timeout = 7000){
+function query(filters, timeout = 7000, relays = RELAYS){
   return new Promise(resolve => {
-    const evs = new Map(); let pending = RELAYS.length, done = false; const socks = [];
+    const evs = new Map(); let pending = relays.length, done = false; const socks = [];
     const sub = 'b' + Math.random().toString(36).slice(2, 9);
     const finish = () => { if (done) return; done = true; clearTimeout(timer);
       socks.forEach(w => { try{ w.close(); }catch(e){} }); resolve([...evs.values()]); };
     const timer = setTimeout(finish, timeout);
-    RELAYS.forEach(url => {
+    relays.forEach(url => {
       let ended = false; const end = () => { if (ended) return; ended = true; if (--pending <= 0) finish(); };
       let w; try { w = new WebSocket(url); } catch(e){ end(); return; }
       socks.push(w);
@@ -206,14 +206,20 @@ const chunk = (a, n) => { const r = []; for (let i = 0; i < a.length; i += n) r.
 /* ---------- 昵称 ---------- */
 const names = LS.get('book.names', {});
 const nameOf = pk => names[pk] || ('无名氏·' + pk.slice(0, 4));
+// 资料（kind 0）分散在各中继，额外问两个专门收录资料的中继
+const PROFILE_RELAYS = [...new Set([...RELAYS, 'wss://purplepag.es', 'wss://user.kindpag.es'])];
+const nameTries = {};
 async function ensureNames(pks){
-  const miss = [...new Set(pks)].filter(pk => !names[pk]);
+  const miss = [...new Set(pks)].filter(pk => !names[pk] && (nameTries[pk] || 0) < 2);
   if (!miss.length) return;
-  const res = await Promise.all(chunk(miss, 250).map(a => query([{kinds:[0], authors:a}], 5000)));
+  miss.forEach(pk => nameTries[pk] = (nameTries[pk] || 0) + 1);
+  const res = await Promise.all(chunk(miss, 150).map(a => query([{kinds:[0], authors:a}], 7000, PROFILE_RELAYS)));
   const best = {};
   res.flat().forEach(e => { if (!best[e.pubkey] || best[e.pubkey].created_at < e.created_at) best[e.pubkey] = e; });
   Object.values(best).forEach(e => {
-    try{ const c = JSON.parse(e.content); const n = (c.display_name || c.displayName || c.name || '').trim();
+    try{ const c = JSON.parse(e.content);
+      const n = [c.display_name, c.displayName, c.name, String(c.nip05 || '').split('@')[0].replace(/^_$/, '')]
+        .map(x => typeof x === 'string' ? x.trim() : '').find(Boolean) || '';
       if (n) names[e.pubkey] = n.slice(0, 24); }catch(err){}
   });
   LS.set('book.names', names);
@@ -244,7 +250,7 @@ book.appendChild(M);
 const MB = M.querySelector('.body');
 const overflows = () => MB.scrollHeight > MB.clientHeight + 1;
 
-function postEl(paras, author, {dc = false, cont = false, by = true} = {}){
+function postEl(paras, pk, {dc = false, cont = false, by = true} = {}){
   const d = document.createElement('div'); d.className = 'post' + (cont ? ' cont' : '');
   paras.forEach((tx, i) => {
     const p = document.createElement('p');
@@ -256,7 +262,7 @@ function postEl(paras, author, {dc = false, cont = false, by = true} = {}){
     else p.textContent = tx;
     d.append(p);
   });
-  if (by){ const b = document.createElement('div'); b.className = 'by'; b.textContent = '—— ' + author; d.append(b); }
+  if (by){ const b = document.createElement('div'); b.className = 'by'; b.dataset.pk = pk; b.textContent = '—— ' + nameOf(pk); d.append(b); }
   return d;
 }
 function ornEl(){ const o = document.createElement('p'); o.className = 'orn'; o.textContent = '◇'; return o; }
@@ -292,11 +298,11 @@ function paginateDay(day){
   pageKey = day.key; MB.innerHTML = ''; pageAnchor = null;
   let first = true;
   for (const p of day.posts){
-    let paras = p.paras, cont = false; const name = nameOf(p.pk);
+    let paras = p.paras, cont = false;
     for (let guard = 0; guard < 60; guard++){
       const had = MB.childElementCount > 0;
       const orn = had ? ornEl() : null; if (orn) MB.append(orn);
-      const el = postEl(paras, name, {dc: first && !cont, cont});
+      const el = postEl(paras, p.pk, {dc: first && !cont, cont});
       MB.append(el);
       if (!overflows()){ if (!pageAnchor) pageAnchor = p.id; break; }
       el.remove();
@@ -361,6 +367,7 @@ async function loadMore(){
     if (exhausted && held.length){ const g = { key: dayKey(held[0].t), posts: held }; held = []; days.push(g); paginateDay(g); }
     if (exhausted && !pages.some(p => p.type === 'end')) pages.push({ type:'end' });
   } finally { loading = false; }
+  if (!session.demo) ensureNames(days.flatMap(d => d.posts.map(p => p.pk))).catch(() => {});  // 没取到的昵称再试一次
 }
 
 /* ---------- 渲染 ---------- */
@@ -396,6 +403,7 @@ function render(i){
     const n = days.reduce((a, d) => a + d.posts.length, 0);
     el.innerHTML = '<div class="end"><p class="orn">· ◇ ·</p><h2>全书完</h2><p>共 ' + cn(chapterNo) + ' 章 · ' + cn(n) + ' 篇</p></div>';
   }
+  el.querySelectorAll('.by[data-pk]').forEach(b => { b.textContent = '—— ' + nameOf(b.dataset.pk); });  // 昵称晚到也能补上
   const sh = document.createElement('i'); sh.className = 'sheen'; el.append(sh);
   return el;
 }

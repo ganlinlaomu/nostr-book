@@ -114,6 +114,28 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
 .end{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
 .end h2{margin:0;font-size:22px;font-weight:600;letter-spacing:.5em;text-indent:.5em}
 .end p{margin:0;font-size:12px;letter-spacing:.2em;color:var(--muted)}
+/* Writer is a separate paper layer. Reading/book pages are unchanged. */
+.writer-overlay{position:fixed;inset:0;z-index:50;overflow-y:auto;overscroll-behavior:contain;background:var(--paper);color:var(--ink);padding:0 max(18px,env(safe-area-inset-right)) 0 max(18px,env(safe-area-inset-left))}
+.writer-paper{max-width:680px;min-height:100%;margin:0 auto;padding:calc(20px + env(safe-area-inset-top)) 0 calc(32px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:16px}
+.writer-top{display:flex;align-items:center;justify-content:space-between;border-bottom:.5px solid var(--rule);padding-bottom:14px;gap:12px}
+.writer-top h2{margin:0;font-size:14px;letter-spacing:.24em;font-weight:400;color:var(--muted)}
+.writer-top button,.writer-foot button{border:0;font-size:13px;letter-spacing:.08em;padding:8px 3px;text-indent:0;color:var(--accent)}
+.writer-caption{font-size:12px;color:var(--muted);letter-spacing:.15em}
+.writer-text{flex:1;min-height:min(50vh,420px);resize:vertical;width:100%;border:0;background:transparent;color:var(--ink);font:16.5px/2 var(--serif);text-align:left;letter-spacing:.02em;outline:none;-webkit-user-select:text;user-select:text;padding:6px 0}
+.writer-text::placeholder{color:var(--muted);opacity:.65}
+.writer-foot{border-top:.5px solid var(--rule);padding-top:14px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.writer-meta{font-size:11px;color:var(--muted);line-height:1.8}
+.writer-status{min-height:24px;font-size:12px;line-height:1.7;color:var(--accent);white-space:normal;overflow-wrap:anywhere}
+.writer-status.error{color:#b44a39}
+.writer-panel{border-top:.5px solid var(--rule);display:flex;flex-direction:column;gap:12px;padding-top:16px}
+.writer-panel h3{font-weight:400;font-size:14px;margin:0;letter-spacing:.12em}
+.writer-panel p{margin:0;color:var(--muted);font-size:12px;line-height:1.8}
+.writer-panel input{font-size:14px;text-align:left;border-bottom:.5px solid var(--rule);border-radius:0}
+.writer-panel button,.writer-publish{border:.5px solid var(--rule);border-radius:3px;color:var(--ink);font-size:13px;padding:9px 14px;letter-spacing:.08em;text-indent:0}
+.writer-note{font-size:11px;color:var(--muted);line-height:1.8}
+.writer-publish{border-color:var(--accent);color:var(--accent);padding-inline:20px}
+.writer-foot button[disabled],.writer-panel button[disabled]{opacity:.5}
+@media (max-width:420px){.bar .acts{gap:7px}.bar .link{font-size:11px}.writer-paper{gap:12px}.writer-top h2{font-size:12px}.writer-foot{gap:6px}.writer-text{min-height:42vh}}
 </style>
 
 </head>
@@ -122,6 +144,7 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
   <div class="bar" id="bar" hidden>
     <span class="where" id="where"></span>
     <span class="acts">
+      <button class="link" id="writePost" type="button">写</button>
       <button class="link" id="syncNow">同步</button>
       <button class="link" id="toLatest">回到最新</button>
       <button class="link" id="toCover">封面</button>
@@ -131,6 +154,40 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
   <button type="button" class="new-posts" id="newPosts" aria-live="polite" hidden></button>
   <div class="toast" id="toast" hidden></div>
 </div>
+<section class="writer-overlay" id="writerOverlay" role="dialog" aria-modal="true" aria-labelledby="writerTitle" hidden>
+  <div class="writer-paper">
+    <header class="writer-top">
+      <button type="button" id="writerClose">返回书页</button>
+      <h2 id="writerTitle">驿书 · 随笔</h2>
+      <span class="writer-caption">◇</span>
+    </header>
+    <p class="writer-caption">写下你想留下的文字</p>
+    <textarea id="writerText" class="writer-text" placeholder="此刻，想写点什么……" maxlength="12000" spellcheck="true" aria-label="随笔正文"></textarea>
+    <p class="writer-meta" id="writerSaved" aria-live="polite">草稿保存在本机</p>
+    <section class="writer-panel" id="writerSetup" hidden>
+      <h3>第一次发表 · 设置加密私钥</h3>
+      <p>输入当前阅读账号的 nsec。私钥在这台设备本地加密，不发送给 Relay。试用阶段请先使用测试账号，不建议立即导入重要主账号的私钥；密码遗失需重新导入。</p>
+      <input id="writerSecret" type="password" placeholder="nsec1… 或 64 位十六进制私钥" autocomplete="off" spellcheck="false" autocapitalize="off" aria-label="Nostr 私钥">
+      <input id="writerNewPass" type="password" placeholder="加密密码（至少 12 字符）" autocomplete="new-password" aria-label="设置加密密码">
+      <input id="writerNewPassConfirm" type="password" placeholder="再输入一次加密密码" autocomplete="new-password" aria-label="确认加密密码">
+      <button type="button" id="writerSaveKey">加密保存</button>
+    </section>
+    <section class="writer-panel" id="writerUnlock" hidden>
+      <h3>发表前解锁</h3>
+      <p>仅本次签名时解锁；成功或失败后不保留解密私钥。联网后发送 Nostr kind 1 动态。</p>
+      <input id="writerUnlockPass" type="password" placeholder="本地解锁密码" autocomplete="off" aria-label="私钥解锁密码">
+      <button type="button" id="writerSend">解锁并发表</button>
+    </section>
+    <p id="writerStatus" class="writer-status" role="status" aria-live="polite"></p>
+    <footer class="writer-foot">
+      <div class="writer-meta"><span id="writerKeyState">尚未设置签名密钥</span></div>
+      <div><button type="button" id="writerImport">设置本地私钥</button>
+      <button type="button" id="writerPublish" class="writer-publish">发表</button>
+      <button type="button" id="writerPublished" hidden>返回阅读</button></div>
+    </footer>
+    <p class="writer-note">阅读与写作无需私钥。发表需要联网；如果 Relay 未确认接收，草稿会保留。卸载应用或清理网站数据可能清除本地草稿和加密密钥。</p>
+  </div>
+</section>
 
 <script>
 (() => {
@@ -738,7 +795,8 @@ book.addEventListener('pointerup', e => {
   }
 });
 document.addEventListener('keydown', e => {
-  if (e.target.closest && e.target.closest('input')) return;
+  if (!document.getElementById('writerOverlay').hidden) return;
+  if (e.target.closest && e.target.closest('input,textarea')) return;
   if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown'){ e.preventDefault(); go(1); }
   if (e.key === 'ArrowLeft' || e.key === 'PageUp'){ e.preventDefault(); go(-1); }
 });
@@ -842,6 +900,7 @@ async function refreshFollows(pk){
 
 /* 屏幕尺寸或字体变化时重新排版，停在原来那一页 */
 function repaginate(){
+  if (!document.getElementById('writerOverlay').hidden) return;
   if (!days.length) return;
   if (busy){ later(); return; }                                  // 翻页动画中重排会留下一张旧页，等动画结束
   const a = pages[idx] && pages[idx].anchor, ty = pages[idx] && pages[idx].type;
@@ -889,6 +948,7 @@ function buildDemo(){
 }
 
 /* ---------- 启动 ---------- */
+window.bookWriterReader = () => session && !session.demo ? session.pk : null;
 reset();
 const ready = document.fonts ? document.fonts.ready : Promise.resolve();
 ready.then(() => {
@@ -912,6 +972,7 @@ if ('serviceWorker' in navigator && location.protocol === 'https:' && document.q
 }
 })();
 </script>
+<script type="module" src="./writer.js"></script>
 
 </body>
 </html>

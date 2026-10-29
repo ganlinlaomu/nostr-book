@@ -23,7 +23,7 @@ let draftGeneration = 0;
 const encoder = new TextEncoder();
 const KDF_ITERATIONS = 310000;
 const MAX_CONTENT = 12000;
-const NOBLE_SOURCE = 'https://cdn.jsdelivr.net/npm/@noble/secp256k1@3.1.0/index.js';
+const NOBLE_SOURCE = './vendor/noble-secp256k1.js';
 let schnorrPromise;
 function showStatus(text, error = false){
   status.textContent = text;
@@ -135,8 +135,8 @@ async function flushDraft(){
   clearTimeout(saveTimer);saveTimer=null;
   if (!activePk) return;
   const pk=activePk, text=editor.value;
-  try{await draftIO(pk,text);if(pk===activePk)saveHint.textContent='草稿已保存在本机';}
-  catch(e){if(pk===activePk){saveHint.textContent='草稿保存失败';showStatus('本地存储不可用，请先复制文字备份',true);}}
+  try{await draftIO(pk,text);if(pk===activePk)saveHint.textContent='草稿已保存在本机';return true;}
+  catch(e){if(pk===activePk){saveHint.textContent='草稿保存失败';showStatus('本地存储不可用，请先复制文字备份',true);}return false;}
 }
 function scheduleDraft(){
   saveHint.textContent='正在保存…';
@@ -255,7 +255,7 @@ async function publish(){
   const content=editor.value.trim();
   if(!content){showStatus('请先写点什么',true);editor.focus();return;}
   if(content.length>MAX_CONTENT){showStatus('正文过长，请保持在 12000 字符以内',true);return;}
-  await flushDraft();
+  if(!await flushDraft())return;
   if(!getVault(activePk)){showPanel('setup');showStatus('首次发表，请先设置本地加密私钥');secretInput.focus();return;}
   if(!navigator.onLine){showStatus('当前离线，草稿已保存；联网后可发表',true);return;}
   showPanel('unlock');showStatus('输入解锁密码后才会签名发表');unlockPassInput.focus();
@@ -270,7 +270,7 @@ async function signAndSend(){
   setBusy(true);
   unlockPassInput.value='';
   try{
-    await flushDraft();
+    if(!await flushDraft())throw Error('草稿未能保存，请检查本机存储空间');
     const vault=getVault(pk);
     if(!vault)throw Error('签名密钥未设置');
     sk=await decryptSecret(vault,password);

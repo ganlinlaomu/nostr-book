@@ -8,12 +8,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="时间线">
+<meta name="apple-mobile-web-app-title" content="驿书">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-512.png">
 <link rel="icon" href="icon-512.png">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}[hidden]{display:none!important}</style>
-<title>时间线 · 书</title>
+<title>驿书</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600&display=swap">
@@ -99,7 +99,8 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
 /* chrome */
 .bar{position:absolute;top:0;left:0;right:0;z-index:10;background:var(--bar);border-bottom:.5px solid var(--rule);
   display:flex;align-items:center;justify-content:space-between;gap:8px;
-  padding-block:10px;padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px))}
+  padding-top:max(10px, env(safe-area-inset-top, 0px));padding-bottom:10px;padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px))}
+.head .home{font:inherit;color:inherit;letter-spacing:inherit;background:none;border:0;padding:0 8px 0 0;cursor:pointer}
 .bar .where{font-size:12px;color:var(--muted);letter-spacing:.15em}
 .bar .acts{display:flex;gap:14px}
 .toast{position:absolute;left:50%;bottom:44px;transform:translateX(-50%);z-index:11;background:var(--bar);
@@ -127,6 +128,8 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
 (() => {
 'use strict';
 /* ---------- 设置 ---------- */
+const BOOK = '驿书';
+const spaced = t => [...t].join(' ');
 const DEFAULT_RELAYS = ['wss://relay.damus.io','wss://nos.lol','wss://relay.primal.net'];
 const LS = {
   get(k, d){ try{ const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); }catch(e){ return d; } },
@@ -245,7 +248,7 @@ function clean(ev){
 const book = document.getElementById('book');
 const M = document.createElement('div');
 M.className = 'page measure';
-M.innerHTML = '<div class="head"><span>时 间 线</span><span>十月廿九日</span></div><div class="body"></div><div class="foot">一</div>';
+M.innerHTML = '<div class="head"><span>' + spaced(BOOK) + '</span><span>十月廿九日</span></div><div class="body"></div><div class="foot">一</div>';
 book.appendChild(M);
 const MB = M.querySelector('.body');
 const overflows = () => MB.scrollHeight > MB.clientHeight + 1;
@@ -375,7 +378,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>'
 let coverState = 'login', coverError = '';
 function coverHTML(){
   const yr = yearCn(new Date().getFullYear());
-  const title = '<div class="ttl"><p class="kicker">NOSTR · 合集</p><h1>时间线</h1><p class="sub">把你关注的人，读成一本书</p></div>';
+  const title = '<div class="ttl"><p class="kicker">NOSTR · 合集</p><h1>' + BOOK + '</h1><p class="sub">把你关注的人，读成一本书</p></div>';
   if (coverState === 'loading') return '<div class="cover">' + title + '<p class="hint">正在装订……</p><p class="imprint">' + yr + '年 · 初版</p></div>';
   if (coverState === 'ready') return '<div class="cover">' + title +
     '<p class="reader">读者　' + esc(readerName) + '</p><p class="hint">左滑翻开</p>' +
@@ -397,7 +400,7 @@ function render(i){
       '<p class="orn">· ◇ ·</p><p class="meta">本日收录 ' + cn(pg.count) + ' 篇</p><p class="meta">执笔者 ' + cn(pg.authors) + ' 人</p>' +
       '<p class="yr">' + yearCn(y) + '年</p></div>';
   } else if (pg.type === 'text'){
-    el.innerHTML = '<div class="head"><span>时 间 线</span><span>' + mdLabel(pg.key) + '</span></div><div class="body">' + pg.html +
+    el.innerHTML = '<div class="head"><button class="home" title="回到封面">' + spaced(BOOK) + '</button><span>' + mdLabel(pg.key) + '</span></div><div class="body">' + pg.html +
       '</div><div class="foot">— ' + cn(i) + ' —</div>';
   } else {
     const n = days.reduce((a, d) => a + d.posts.length, 0);
@@ -474,6 +477,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft' || e.key === 'PageUp'){ e.preventDefault(); go(-1); }
 });
 document.getElementById('toLatest').addEventListener('click', () => { bar.hidden = true; if (pages.length > 1) show(1); });
+book.addEventListener('click', e => { if (e.target.closest('.head .home')) { bar.hidden = true; show(0); } });
 document.getElementById('toCover').addEventListener('click', () => { bar.hidden = true; show(0); });
 document.getElementById('logout').addEventListener('click', () => { bar.hidden = true; logout(); });
 

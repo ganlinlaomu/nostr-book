@@ -759,9 +759,10 @@ async function start(pk, demo = false){
   else {
     relayReached = false;
     // 关注列表（kind 3）各中继收得不全：连同资料中继一起问，没拿到再试一次
-    const ask = () => query([{ kinds:[3], authors:[pk], limit:3 }], 8000, PROFILE_RELAYS);
+    const ask = () => query([{ kinds:[3], authors:[pk], limit:3 }], 8000,
+      [...new Set([...PROFILE_RELAYS, ...(relayHints[pk] || [])])]);
     let c = await ask();
-    if (!c.length) c = await ask();
+    if (!c.length){ await refreshRelayHints(); c = await ask(); }
     if (!relayReached){ session = null; coverState = 'login';
       coverError = '连不上中继。在预览里这个页面不能联网，部署到自己的网址后就能用；现在可以先看示例。'; show(0); return; }
     const latest = c.sort((a, b) => b.created_at - a.created_at)[0];
@@ -810,7 +811,8 @@ function restore(pk){
 async function refreshFollows(pk){
   if (!session || session.demo || session.pk !== pk) return false;
   lastFollowsCheck = Date.now();
-  const c = await query([{ kinds:[3], authors:[pk], limit:3 }], 8000, PROFILE_RELAYS);
+  const c = await query([{ kinds:[3], authors:[pk], limit:3 }], 8000,
+    [...new Set([...PROFILE_RELAYS, ...(relayHints[pk] || [])])]);
   const latest = c.sort((a, b) => b.created_at - a.created_at)[0];
   if (!latest || !session || session.pk !== pk) return false;
   const f = [...new Set(latest.tags.filter(t => t[0] === 'p' && /^[0-9a-f]{64}$/.test(t[1])).map(t => t[1]))].filter(x => x !== pk);

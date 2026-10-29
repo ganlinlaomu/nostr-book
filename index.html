@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#f3ecdc" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1d1914" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -47,6 +47,7 @@ body{height:100%;margin:0;background:var(--paper);color:var(--ink);font-family:v
 .foot{text-align:center;font-size:12px;color:var(--muted);letter-spacing:.3em;padding-top:10px}
 .post p{margin:0;font-size:16.5px;line-height:1.95;text-align:justify;text-indent:2em;letter-spacing:.02em;overflow-wrap:anywhere}
 .post p+p{margin-top:.35em}
+.post p.q{text-indent:0;margin-left:1em;padding-left:.8em;border-left:2px solid var(--rule);color:var(--muted)}
 .post.cont p:first-child,.post.has-dc p:first-child{text-indent:0}
 .dc{float:left;font-size:3.05em;line-height:1;margin:.1em .14em 0 0;color:var(--accent);font-weight:600}
 .by{text-align:right;font-size:13px;color:var(--accent);margin-top:6px;letter-spacing:.1em;clear:both}
@@ -59,8 +60,8 @@ body{height:100%;margin:0;background:var(--paper);color:var(--ink);font-family:v
 .sub{margin:0;font-size:13px;color:var(--muted);letter-spacing:.12em}
 form{display:flex;flex-direction:column;align-items:center;gap:14px;width:min(80%,300px)}
 label{font-size:12px;color:var(--muted);letter-spacing:.3em}
-input{width:100%;font:inherit;font-size:14px;color:var(--ink);background:transparent;border:0;border-bottom:.5px solid var(--rule);
-  padding:8px 2px;text-align:center;outline:none;-webkit-user-select:text;user-select:text}
+input{width:100%;font:inherit;color:var(--ink);background:transparent;border:0;border-bottom:.5px solid var(--rule);
+  padding:8px 2px;text-align:center;outline:none;font-size:16px;-webkit-user-select:text;user-select:text}
 input:focus{border-bottom-color:var(--accent)}
 button{font:inherit;color:var(--ink);background:transparent;border:.5px solid var(--ink);border-radius:3px;padding:7px 26px;
   font-size:14px;letter-spacing:.4em;text-indent:.4em;cursor:pointer}
@@ -251,7 +252,8 @@ function postEl(paras, author, {dc = false, cont = false, by = true} = {}){
       d.classList.add('has-dc');
       const s = document.createElement('span'); s.className = 'dc'; s.textContent = tx[0];
       p.append(s, tx.slice(1));
-    } else p.textContent = tx;
+    } else if (/^[>＞]/.test(tx)){ p.className = 'q'; p.textContent = tx.replace(/^[>＞]\s*/, ''); }
+    else p.textContent = tx;
     d.append(p);
   });
   if (by){ const b = document.createElement('div'); b.className = 'by'; b.textContent = '—— ' + author; d.append(b); }

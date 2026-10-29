@@ -374,6 +374,7 @@ async function loadMore(){
     if (exhausted && held.length){ const g = { key: dayKey(held[0].t), posts: held }; held = []; days.push(g); paginateDay(g); }
     if (exhausted && !pages.some(p => p.type === 'end')) pages.push({ type:'end' });
   } finally { loading = false; }
+  saveCache();
   if (!session.demo) ensureNames(days.flatMap(d => d.posts.map(p => p.pk))).catch(() => {});  // 没取到的昵称再试一次
 }
 
@@ -416,6 +417,7 @@ function applyFresh(){
   days.forEach(paginateDay);
   if (exhausted) pages.push({ type:'end' });
   bar.hidden = true; show(Math.min(1, pages.length - 1));
+  saveCache();
 }
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && Date.now() - lastCheck > 120000) checkFresh();
@@ -535,7 +537,7 @@ document.getElementById('logout').addEventListener('click', () => { bar.hidden =
 
 /* ---------- 会话 ---------- */
 function reset(){ fresh = []; lastCheck = Date.now(); pages = [{ type:'cover' }]; chapterNo = 0; days = []; held = []; seen = new Set(); exhausted = false; loading = false; follows = []; }
-function logout(){ session = null; LS.del('book.pk'); reset(); coverState = 'login'; coverError = ''; show(0); }
+function logout(){ session = null; LS.del('book.pk'); LS.del(CACHE_KEY); reset(); coverState = 'login'; coverError = ''; show(0); }
 async function start(pk, demo = false){
   reset(); session = { pk, demo }; cursor = Math.floor(Date.now() / 1000);
   coverState = 'loading'; coverError = ''; show(0);
@@ -564,9 +566,45 @@ async function start(pk, demo = false){
   }
 }
 
+/* ---------- 本地书库：装订好的篇章存在手机上，下次打开直接读，新的在后台查 ---------- */
+const CACHE_KEY = 'book.cache', CACHE_MAX = 800;
+function saveCache(){
+  if (!session || session.demo || !days.length) return;
+  const keep = []; let n = 0;
+  for (const d of days){ if (n >= CACHE_MAX && keep.length) break; keep.push(d); n += d.posts.length; }   // 按整天截断
+  const cut = keep.length < days.length;
+  const posts = keep.flatMap(d => d.posts);
+  LS.set(CACHE_KEY, { v:1, pk:session.pk, follows, posts, held: cut ? [] : held,
+    cursor: cut ? posts[posts.length - 1].t - 1 : cursor, exhausted: cut ? false : exhausted });
+}
+function restore(pk){
+  const c = LS.get(CACHE_KEY, null);
+  if (!c || c.v !== 1 || c.pk !== pk || !Array.isArray(c.posts) || !c.posts.length) return false;
+  reset(); session = { pk, demo:false };
+  follows = c.follows || []; cursor = c.cursor; exhausted = !!c.exhausted; held = c.held || [];
+  c.posts.concat(held).forEach(p => seen.add(p.id));
+  days = groupDays(c.posts.slice());
+  days.forEach(paginateDay);
+  if (exhausted) pages.push({ type:'end' });
+  readerName = nameOf(pk); coverState = 'ready';
+  const mark = LS.get('book.mark', null);
+  const at = mark ? pages.findIndex(p => p.anchor === mark && p.type === 'text') : -1;
+  show(at > 0 ? at : Math.min(1, pages.length - 1));
+  refreshFollows(pk).then(checkFresh, checkFresh);
+  return true;
+}
+async function refreshFollows(pk){
+  const c = await query([{ kinds:[3], authors:[pk], limit:3 }], 8000, PROFILE_RELAYS);
+  const latest = c.sort((a, b) => b.created_at - a.created_at)[0];
+  if (!latest || !session || session.pk !== pk) return;
+  const f = [...new Set(latest.tags.filter(t => t[0] === 'p' && /^[0-9a-f]{64}$/.test(t[1])).map(t => t[1]))].filter(x => x !== pk);
+  if (f.length){ follows = f; saveCache(); }
+}
+
 /* 屏幕尺寸或字体变化时重新排版，停在原来那一页 */
 function repaginate(){
   if (!days.length) return;
+  if (busy){ later(); return; }                                  // 翻页动画中重排会留下一张旧页，等动画结束
   const a = pages[idx] && pages[idx].anchor, ty = pages[idx] && pages[idx].type;
   pages = [{ type:'cover' }]; chapterNo = 0;
   days.forEach(paginateDay);
@@ -616,7 +654,7 @@ reset();
 const ready = document.fonts ? document.fonts.ready : Promise.resolve();
 ready.then(() => {
   const saved = LS.get('book.pk', null);
-  if (saved) start(saved); else show(0);
+  if (saved){ if (!restore(saved)) start(saved); } else show(0);
 });
 if ('serviceWorker' in navigator && location.protocol === 'https:' && document.querySelector('link[rel="manifest"]')){
   navigator.serviceWorker.register('sw.js').catch(() => {});

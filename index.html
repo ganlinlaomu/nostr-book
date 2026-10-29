@@ -101,6 +101,9 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
   display:flex;align-items:center;justify-content:space-between;gap:8px;
   padding-top:max(10px, env(safe-area-inset-top, 0px));padding-bottom:10px;padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px))}
 .head .home{font:inherit;color:inherit;letter-spacing:inherit;background:none;border:0;padding:0 8px 0 0;cursor:pointer}
+.head .when{font:inherit;color:inherit;letter-spacing:inherit;background:none;border:0;padding:0 0 0 12px;cursor:pointer;
+  display:inline-flex;align-items:center;gap:7px}
+.head .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none}
 .bar .where{font-size:12px;color:var(--muted);letter-spacing:.15em}
 .bar .acts{display:flex;gap:14px}
 .toast{position:absolute;left:50%;bottom:44px;transform:translateX(-50%);z-index:11;background:var(--bar);
@@ -374,6 +377,51 @@ async function loadMore(){
   if (!session.demo) ensureNames(days.flatMap(d => d.posts.map(p => p.pk))).catch(() => {});  // 没取到的昵称再试一次
 }
 
+/* ---------- 新到：切回前台时查有没有更新的篇章，有就在页眉日期旁点一个小点 ---------- */
+let fresh = [], lastCheck = 0, checking = false;
+const whenHTML = key => fresh.length
+  ? '<button class="when" title="有新篇章，点此装订">' + mdLabel(key) + '<i class="dot"></i></button>'
+  : '<span>' + mdLabel(key) + '</span>';
+function updateDot(){
+  const h = curEl && curEl.querySelector('.head'); const pg = pages[idx];
+  if (h && pg && pg.key) h.lastElementChild.outerHTML = whenHTML(pg.key);
+}
+async function checkFresh(){
+  if (!session || session.demo || checking || !days.length || !follows.length) return;
+  checking = true; lastCheck = Date.now();
+  const sess = session;
+  try {
+    const since = Math.max(days[0].posts[0].t, ...fresh.map(p => p.t)) + 1;
+    const now = Math.floor(Date.now() / 1000) + 600;
+    const res = await Promise.all(chunk(follows, 250).map(a => query([{ kinds:[1], authors:a, since, limit:100 }], 8000)));
+    const have = new Set(fresh.map(p => p.id)), got = new Map();
+    res.flat().forEach(e => { if (e.created_at <= now && !seen.has(e.id) && !have.has(e.id)) got.set(e.id, e); });
+    const posts = [...got.values()].map(clean).filter(Boolean);
+    if (!posts.length) return;
+    await ensureNames(posts.map(p => p.pk));
+    if (session !== sess) return;
+    fresh = fresh.concat(posts);
+    updateDot();
+  } catch(e){} finally { checking = false; }
+}
+function applyFresh(){
+  if (!fresh.length || busy || loading) return;
+  const posts = fresh; fresh = [];
+  posts.forEach(p => seen.add(p.id));
+  groupDays(posts).reverse().forEach(g => {                     // 从旧到新并入书首
+    if (days[0] && days[0].key === g.key) days[0].posts = g.posts.concat(days[0].posts).sort((a, b) => b.t - a.t);
+    else days.unshift(g);
+  });
+  pages = [{ type:'cover' }]; chapterNo = 0;
+  days.forEach(paginateDay);
+  if (exhausted) pages.push({ type:'end' });
+  bar.hidden = true; show(Math.min(1, pages.length - 1));
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && Date.now() - lastCheck > 120000) checkFresh();
+});
+setInterval(() => { if (document.visibilityState === 'visible' && Date.now() - lastCheck > 300000) checkFresh(); }, 60000);
+
 /* ---------- 渲染 ---------- */
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let coverState = 'login', coverError = '';
@@ -401,7 +449,7 @@ function render(i){
       '<p class="orn">· ◇ ·</p><p class="meta">本日收录 ' + cn(pg.count) + ' 篇</p><p class="meta">执笔者 ' + cn(pg.authors) + ' 人</p>' +
       '<p class="yr">' + yearCn(y) + '年</p></div>';
   } else if (pg.type === 'text'){
-    el.innerHTML = '<div class="head"><button class="home" title="回到封面">' + spaced(BOOK) + '</button><span>' + mdLabel(pg.key) + '</span></div><div class="body">' + pg.html +
+    el.innerHTML = '<div class="head"><button class="home" title="回到封面">' + spaced(BOOK) + '</button>' + whenHTML(pg.key) + '</div><div class="body">' + pg.html +
       '</div><div class="foot">— ' + cn(i) + ' —</div>';
   } else {
     const n = days.reduce((a, d) => a + d.posts.length, 0);
@@ -478,12 +526,15 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft' || e.key === 'PageUp'){ e.preventDefault(); go(-1); }
 });
 document.getElementById('toLatest').addEventListener('click', () => { bar.hidden = true; if (pages.length > 1) show(1); });
-book.addEventListener('click', e => { if (e.target.closest('.head .home')) { bar.hidden = true; show(0); } });
+book.addEventListener('click', e => {
+  if (e.target.closest('.head .home')) { bar.hidden = true; show(0); }
+  else if (e.target.closest('.head .when')) applyFresh();
+});
 document.getElementById('toCover').addEventListener('click', () => { bar.hidden = true; show(0); });
 document.getElementById('logout').addEventListener('click', () => { bar.hidden = true; logout(); });
 
 /* ---------- 会话 ---------- */
-function reset(){ pages = [{ type:'cover' }]; chapterNo = 0; days = []; held = []; seen = new Set(); exhausted = false; loading = false; follows = []; }
+function reset(){ fresh = []; lastCheck = Date.now(); pages = [{ type:'cover' }]; chapterNo = 0; days = []; held = []; seen = new Set(); exhausted = false; loading = false; follows = []; }
 function logout(){ session = null; LS.del('book.pk'); reset(); coverState = 'login'; coverError = ''; show(0); }
 async function start(pk, demo = false){
   reset(); session = { pk, demo }; cursor = Math.floor(Date.now() / 1000);

@@ -1,4 +1,4 @@
-const CACHE = 'book-v5';
+const CACHE = 'book-v6';
 const SHELL = ['./', 'index.html', 'manifest.json', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', e => {

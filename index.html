@@ -106,6 +106,7 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
 .head .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none}
 .bar .where{font-size:12px;color:var(--muted);letter-spacing:.15em}
 .bar .acts{display:flex;gap:14px}
+.new-posts{position:absolute;z-index:12;top:max(58px,calc(env(safe-area-inset-top,0px) + 58px));right:18px;background:var(--bar);border-color:var(--rule);color:var(--accent);font-size:12px;letter-spacing:.1em;padding:8px 12px;box-shadow:0 2px 12px rgba(0,0,0,.08)}
 .toast{position:absolute;left:50%;bottom:44px;transform:translateX(-50%);z-index:11;background:var(--bar);
   border:.5px solid var(--rule);border-radius:3px;padding:8px 16px;font-size:12px;letter-spacing:.15em;color:var(--muted);white-space:nowrap}
 .end{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
@@ -124,6 +125,7 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
       <button class="link" id="logout">换读者</button>
     </span>
   </div>
+  <button type="button" class="new-posts" id="newPosts" aria-live="polite" hidden></button>
   <div class="toast" id="toast" hidden></div>
 </div>
 
@@ -211,14 +213,16 @@ const chunk = (a, n) => { const r = []; for (let i = 0; i < a.length; i += n) r.
 
 /* ---------- 昵称 ---------- */
 const names = LS.get('book.names', {});
+const nameUpdated = LS.get('book.names.updated', {});
 const nameOf = pk => names[pk] || ('无名氏·' + pk.slice(0, 4));
 // 资料（kind 0）分散在各中继，额外问两个专门收录资料的中继
 const PROFILE_RELAYS = [...new Set([...RELAYS, 'wss://purplepag.es', 'wss://user.kindpag.es'])];
 const nameTries = {};
 async function ensureNames(pks){
-  const miss = [...new Set(pks)].filter(pk => !names[pk] && (nameTries[pk] || 0) < 2);
+  const now = Date.now();
+  const miss = [...new Set(pks)].filter(pk => (!names[pk] || now - (nameUpdated[pk] || 0) > 86400000) && (nameTries[pk] || 0) < 2);
   if (!miss.length) return;
-  miss.forEach(pk => nameTries[pk] = (nameTries[pk] || 0) + 1);
+  miss.forEach(pk => { nameTries[pk] = (nameTries[pk] || 0) + 1; nameUpdated[pk] = now; });
   const res = await Promise.all(chunk(miss, 150).map(a => query([{kinds:[0], authors:a}], 7000, PROFILE_RELAYS)));
   const best = {};
   res.flat().forEach(e => { if (!best[e.pubkey] || best[e.pubkey].created_at < e.created_at) best[e.pubkey] = e; });
@@ -229,6 +233,8 @@ async function ensureNames(pks){
       if (n) names[e.pubkey] = n.slice(0, 24); }catch(err){}
   });
   LS.set('book.names', names);
+  LS.set('book.names.updated', nameUpdated);
+  document.querySelectorAll('.by[data-pk]').forEach(b => { b.textContent = '—— ' + nameOf(b.dataset.pk); });
 }
 
 /* ---------- 正文清理：只留文字 ---------- */
@@ -375,60 +381,171 @@ async function loadMore(){
     if (exhausted && !pages.some(p => p.type === 'end')) pages.push({ type:'end' });
   } finally { loading = false; }
   saveCache();
+  if (applyPending && fresh.length) setTimeout(applyFresh, 0);
   if (!session.demo) ensureNames(days.flatMap(d => d.posts.map(p => p.pk))).catch(() => {});  // 没取到的昵称再试一次
 }
 
-/* ---------- 新到：切回前台时查有没有更新的篇章，有就在页眉日期旁点一个小点 ---------- */
-let fresh = [], lastCheck = 0, checking = false;
+/* ---------- 实时同步：订阅新动态，定时补漏，回到前台恢复 ---------- */
+let fresh = [], lastCheck = 0, checking = false, applyPending = false;
+let liveEpoch = 0, liveSockets = new Set(), liveTimers = new Set(), flushTimer = null;
+let hiddenAt = 0, lastFollowsCheck = 0;
+const BACKFILL_OVERLAP = 3600;     // 回看一小时，补齐延迟传播和临时掉线的事件
+const FOLLOW_REFRESH_MS = 15 * 60000;
 const whenHTML = key => fresh.length
   ? '<button class="when" title="有新篇章，点此装订">' + mdLabel(key) + '<i class="dot"></i></button>'
   : '<span>' + mdLabel(key) + '</span>';
 function updateDot(){
-  const h = curEl && curEl.querySelector('.head'); const pg = pages[idx];
+  const badge = document.getElementById('newPosts');
+  badge.hidden = !fresh.length;
+  if (fresh.length) badge.textContent = '新到 ' + fresh.length + ' 篇 · 阅读';
+  const h = curEl && curEl.querySelector('.head'), pg = pages[idx];
   if (h && pg && pg.key) h.lastElementChild.outerHTML = whenHTML(pg.key);
 }
-async function checkFresh(auto = false){
-  if (!session || session.demo || checking || !days.length || !follows.length) return;
-  checking = true; lastCheck = Date.now();
-  const sess = session;
-  try {
-    const since = Math.max(days[0].posts[0].t, ...fresh.map(p => p.t)) + 1;
-    const now = Math.floor(Date.now() / 1000) + 600;
-    const res = await Promise.all(chunk(follows, 250).map(a => query([{ kinds:[1], authors:a, since, limit:100 }], 8000)));
-    const have = new Set(fresh.map(p => p.id)), got = new Map();
-    res.flat().forEach(e => { if (e.created_at <= now && !seen.has(e.id) && !have.has(e.id)) got.set(e.id, e); });
-    const posts = [...got.values()].map(clean).filter(Boolean);
-    if (!posts.length) return;
-    await ensureNames(posts.map(p => p.pk));
-    if (session !== sess) return;
-    fresh = fresh.concat(posts);
-    if (auto && idx <= 1) applyFresh(); else updateDot();         // 刚打开、还停在最新页：直接装订进来
-  } catch(e){} finally { checking = false; }
-}
 function applyFresh(){
-  if (!fresh.length || busy || loading) return;
-  const posts = fresh; fresh = [];
+  if (!fresh.length) return;
+  if (busy || loading){ applyPending = true; updateDot(); return; }
+  applyPending = false;
+  const prevIndex = idx, posts = fresh;
+  fresh = [];
   posts.forEach(p => seen.add(p.id));
-  groupDays(posts).reverse().forEach(g => {                     // 从旧到新并入书首
-    if (days[0] && days[0].key === g.key) days[0].posts = g.posts.concat(days[0].posts).sort((a, b) => b.t - a.t);
-    else days.unshift(g);
-  });
+  // 按真实日期重新分组；迟到的旧日期不能错误插入书的最前面。
+  const merged = new Map();
+  days.flatMap(d => d.posts).concat(posts).forEach(p => merged.set(p.id, p));
+  days = groupDays([...merged.values()]);
   pages = [{ type:'cover' }]; chapterNo = 0;
   days.forEach(paginateDay);
   if (exhausted) pages.push({ type:'end' });
-  bar.hidden = true; show(Math.min(1, pages.length - 1));
+  bar.hidden = true;
+  show(prevIndex === 0 ? 0 : prevIndex <= 2 ? Math.min(prevIndex, pages.length - 1) : Math.min(1, pages.length - 1));
   saveCache();
+  updateDot();
 }
-// 切回前台：离开超过十分钟算“重新打开”，翻回最新页并直接装订新篇章；短暂切走只亮小点
-let hiddenAt = 0;
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden'){ hiddenAt = Date.now(); return; }
-  if (!session || session.demo) return;
+function queueFresh(events){
+  if (!session || session.demo || !days.length) return;
+  const now = Math.floor(Date.now() / 1000) + 600;
+  const have = new Set(fresh.map(p => p.id));
+  let added = 0;
+  for (const ev of events){
+    if (!ev || ev.kind !== 1 || !Number.isFinite(ev.created_at) || ev.created_at > now ||
+        !follows.includes(ev.pubkey) || seen.has(ev.id) || have.has(ev.id)) continue;
+    const post = clean(ev);
+    if (!post) continue;
+    fresh.push(post); have.add(post.id); added++;
+  }
+  if (!added) return;
+  fresh.sort((a,b) => b.t - a.t);
+  updateDot();
+  clearTimeout(flushTimer);
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    if (!session || session.demo) return;
+    ensureNames(fresh.map(p => p.pk)).catch(() => {});
+    if (idx <= 2 || applyPending) applyFresh();
+    else updateDot();
+  }, 600);
+}
+async function checkFresh(auto = false){
+  if (!session || session.demo || checking || !days.length || !follows.length ||
+      document.visibilityState !== 'visible') return;
+  const sess = session;
+  checking = true;
+  lastCheck = Date.now();
+  try {
+    const newest = days[0].posts[0].t;
+    const since = Math.max(0, newest - BACKFILL_OVERLAP);
+    const untilNow = Math.floor(Date.now() / 1000) + 600;
+    // 每组独立翻页，防止高活跃账号填满 Relay 的 limit 而漏掉其他作者。
+    const groups = chunk(follows.slice(), 100);
+    const batches = await Promise.all(groups.map(async authors => {
+      const collected = new Map();
+      let until = untilNow, previousOldest = Infinity;
+      for (let page = 0; page < 18; page++){
+        if (session !== sess || document.visibilityState !== 'visible') break;
+        const list = await query([{ kinds:[1], authors, since, until, limit:150 }], 8000);
+        if (!list.length) break;
+        let oldest = Infinity;
+        list.forEach(e => {
+          if (!e || !Number.isFinite(e.created_at)) return;
+          oldest = Math.min(oldest, e.created_at);
+          if (e.created_at >= since && e.created_at <= untilNow) collected.set(e.id, e);
+        });
+        if (oldest <= since || list.length < 140 || oldest === Infinity) break;
+        const next = oldest < previousOldest ? oldest : oldest - 1;
+        if (next < since || next >= until) break;
+        previousOldest = oldest;
+        until = next;
+      }
+      return [...collected.values()];
+    }));
+    if (session !== sess) return;
+    queueFresh(batches.flat());
+    if (auto && fresh.length && idx <= 2){ clearTimeout(flushTimer); flushTimer = null; applyFresh(); }
+  } catch(e) {
+    // 连线失败保留本地内容；下次轮询和重连会重新补查。
+  } finally {
+    checking = false;
+  }
+}
+function stopLive(){
+  liveEpoch++;
+  liveTimers.forEach(t => clearTimeout(t)); liveTimers.clear();
+  liveSockets.forEach(w => { try{ w.close(); }catch(e){} }); liveSockets.clear();
+}
+function connectLive(url, epoch, attempt = 0){
+  if (epoch !== liveEpoch || !session || session.demo ||
+      document.visibilityState !== 'visible' || !follows.length) return;
+  let w;
+  try { w = new WebSocket(url); } catch(e){ scheduleReconnect(url, epoch, attempt); return; }
+  liveSockets.add(w);
+  w.onopen = () => {
+    if (epoch !== liveEpoch){ w.close(); return; }
+    const since = Math.max(0, Math.floor(Date.now() / 1000) - BACKFILL_OVERLAP);
+    chunk(follows, 100).forEach((authors, i) => {
+      try { w.send(JSON.stringify(['REQ', 'live-' + epoch + '-' + i, {kinds:[1], authors, since, limit:200}])); }
+      catch(e) { try{w.close();}catch(err){} }
+    });
+  };
+  w.onmessage = m => {
+    let data;
+    try { data = JSON.parse(m.data); } catch(e) { return; }
+    if (epoch === liveEpoch && data[0] === 'EVENT' &&
+        typeof data[1] === 'string' && data[1].startsWith('live-' + epoch + '-'))
+      queueFresh([data[2]]);
+  };
+  w.onclose = () => { liveSockets.delete(w); scheduleReconnect(url, epoch, attempt + 1); };
+  w.onerror = () => { try{ w.close(); }catch(e){} };
+}
+function scheduleReconnect(url, epoch, attempt){
+  if (epoch !== liveEpoch || document.visibilityState !== 'visible' || !session) return;
+  const delay = Math.min(60000, 2000 * Math.pow(2, Math.min(attempt, 5)));
+  const timer = setTimeout(() => { liveTimers.delete(timer); connectLive(url, epoch, attempt); }, delay);
+  liveTimers.add(timer);
+}
+function startLive(){
+  stopLive();
+  if (!session || session.demo || !follows.length || document.visibilityState !== 'visible') return;
+  const epoch = liveEpoch;
+  [...new Set(RELAYS)].forEach(url => connectLive(url, epoch));
+}
+function resumeSync(){
+  if (!session || session.demo || document.visibilityState !== 'visible') return;
+  startLive();
   const long = hiddenAt && Date.now() - hiddenAt > 600000;
   if (long && pages.length > 1 && !busy){ bar.hidden = true; show(1); }
   if (long || Date.now() - lastCheck > 120000) checkFresh(long);
+  if (Date.now() - lastFollowsCheck > FOLLOW_REFRESH_MS) refreshFollows(session.pk);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden'){ hiddenAt = Date.now(); stopLive(); return; }
+  resumeSync();
 });
-setInterval(() => { if (document.visibilityState === 'visible' && Date.now() - lastCheck > 300000) checkFresh(); }, 60000);
+window.addEventListener('online', resumeSync);
+window.addEventListener('pageshow', e => { if (e.persisted) resumeSync(); });
+setInterval(() => {
+  if (!session || session.demo || document.visibilityState !== 'visible') return;
+  if (Date.now() - lastCheck > 180000) checkFresh();
+  if (Date.now() - lastFollowsCheck > FOLLOW_REFRESH_MS) refreshFollows(session.pk);
+}, 60000);
 
 /* ---------- 渲染 ---------- */
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -490,6 +607,8 @@ function mount(el){ book.insertBefore(el, bar); }
 function after(){
   if (pages[idx].type === 'cover') bindCover(curEl);
   document.getElementById('where').textContent = idx === 0 ? '封面' : '第 ' + cn(idx) + ' 页';
+  updateDot();
+  if (applyPending && fresh.length) setTimeout(applyFresh, 0);
   if (session && idx > 0 && idx >= pages.length - 4) loadMore().then(() => { if (pages[idx]) document.getElementById('where').textContent = idx === 0 ? '封面' : '第 ' + cn(idx) + ' 页'; });
 }
 // 直接换页：先打断进行中的翻页动画，清掉书里所有旧页，免得有一张旧页（比如封面）压在上面
@@ -539,7 +658,8 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown'){ e.preventDefault(); go(1); }
   if (e.key === 'ArrowLeft' || e.key === 'PageUp'){ e.preventDefault(); go(-1); }
 });
-document.getElementById('toLatest').addEventListener('click', () => { bar.hidden = true; if (pages.length > 1) show(1); });
+document.getElementById('toLatest').addEventListener('click', () => { bar.hidden = true; if (fresh.length) applyFresh(); else if (pages.length > 1) show(1); });
+document.getElementById('newPosts').addEventListener('click', applyFresh);
 book.addEventListener('click', e => {
   if (e.target.closest('.head .home')) { bar.hidden = true; show(0); }
   else if (e.target.closest('.head .when')) applyFresh();
@@ -548,7 +668,7 @@ document.getElementById('toCover').addEventListener('click', () => { bar.hidden 
 document.getElementById('logout').addEventListener('click', () => { bar.hidden = true; logout(); });
 
 /* ---------- 会话 ---------- */
-function reset(){ fresh = []; lastCheck = Date.now(); pages = [{ type:'cover' }]; chapterNo = 0; days = []; held = []; seen = new Set(); exhausted = false; loading = false; follows = []; }
+function reset(){ stopLive(); clearTimeout(flushTimer); flushTimer = null; fresh = []; applyPending = false; checking = false; lastCheck = 0; lastFollowsCheck = 0; pages = [{ type:'cover' }]; chapterNo = 0; days = []; held = []; seen = new Set(); exhausted = false; loading = false; follows = []; updateDot(); }
 function logout(){ session = null; LS.del('book.pk'); LS.del(CACHE_KEY); reset(); coverState = 'login'; coverError = ''; show(0); }
 async function start(pk, demo = false){
   reset(); session = { pk, demo }; cursor = Math.floor(Date.now() / 1000);
@@ -570,6 +690,7 @@ async function start(pk, demo = false){
   }
   await loadMore();
   coverState = 'ready';
+  if (!demo){ startLive(); checkFresh(true); }
   if (idx === 0) show(0);
   if (pages.length > 1){
     setTimeout(() => { if (idx === 0) go(1); }, 500);
@@ -598,16 +719,22 @@ function restore(pk){
   if (exhausted) pages.push({ type:'end' });
   readerName = nameOf(pk); coverState = 'ready';
   show(Math.min(1, pages.length - 1));                           // 打开总是从最新一页读起
-  const fresh0 = () => checkFresh(true);
+  startLive();
+  const fresh0 = () => { if (session && session.pk === pk) checkFresh(true); };
   refreshFollows(pk).then(fresh0, fresh0);
   return true;
 }
 async function refreshFollows(pk){
+  if (!session || session.demo || session.pk !== pk) return;
+  lastFollowsCheck = Date.now();
   const c = await query([{ kinds:[3], authors:[pk], limit:3 }], 8000, PROFILE_RELAYS);
   const latest = c.sort((a, b) => b.created_at - a.created_at)[0];
   if (!latest || !session || session.pk !== pk) return;
   const f = [...new Set(latest.tags.filter(t => t[0] === 'p' && /^[0-9a-f]{64}$/.test(t[1])).map(t => t[1]))].filter(x => x !== pk);
-  if (f.length){ follows = f; saveCache(); }
+  if (f.length && f.join('|') !== follows.join('|')){
+    follows = f; saveCache(); startLive(); checkFresh();
+  }
+  ensureNames([pk]).catch(() => {});
 }
 
 /* 屏幕尺寸或字体变化时重新排版，停在原来那一页 */
@@ -666,7 +793,19 @@ ready.then(() => {
   if (saved){ if (!restore(saved)) start(saved); } else show(0);
 });
 if ('serviceWorker' in navigator && location.protocol === 'https:' && document.querySelector('link[rel="manifest"]')){
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  let hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController) location.reload();
+    hadController = true;
+  });
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    let lastUpdate = Date.now();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastUpdate > 1800000){
+        lastUpdate = Date.now(); reg.update().catch(() => {});
+      }
+    });
+  }).catch(() => {});
 }
 })();
 </script>

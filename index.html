@@ -126,7 +126,6 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
 (() => {
 'use strict';
 /* ---------- 设置 ---------- */
-// 把你的 Baipiao 中继地址加在最前面，例如 'wss://baipiao.example.com'
 const DEFAULT_RELAYS = ['wss://relay.damus.io','wss://nos.lol','wss://relay.primal.net','wss://relay.nostr.band'];
 const LS = {
   get(k, d){ try{ const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); }catch(e){ return d; } },

@@ -1,0 +1,10 @@
+{
+  "name": "时间线 · 书",
+  "short_name": "时间线",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3ecdc",
+  "theme_color": "#f3ecdc",
+  "icons": [{ "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }]
+}

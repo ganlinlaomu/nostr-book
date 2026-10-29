@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f3ecdc" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1d1914" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="时间线">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-512.png">
+<link rel="icon" href="icon-512.png">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}[hidden]{display:none!important}</style>
+<title>时间线 · 书</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600&display=swap">
+<style>
+/* Layout: one full-screen paper page; pages turn on the left spine like a bound book */
+:root{
+  --paper:#f3ecdc; --ink:#2a251e; --muted:#94866d; --accent:#8a6a3c;
+  --rule:#cdbf9f; --spine:rgba(90,62,20,.16); --shade:rgba(40,28,10,.22); --bar:rgba(243,236,220,.94);
+  --serif:'Noto Serif SC','Songti SC','STSong','Source Han Serif SC','SimSun',serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#1d1914; --ink:#e6dccb; --muted:#8c7f69; --accent:#c9a46a;
+  --rule:#4a4133; --spine:rgba(0,0,0,.45); --shade:rgba(0,0,0,.5); --bar:rgba(29,25,20,.94); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#1d1914; --ink:#e6dccb; --muted:#8c7f69; --accent:#c9a46a;
+  --rule:#4a4133; --spine:rgba(0,0,0,.45); --shade:rgba(0,0,0,.5); --bar:rgba(29,25,20,.94); color-scheme:dark}
+html{box-sizing:border-box;height:100%}
+*,*::before,*::after{box-sizing:inherit}
+body{height:100%;margin:0;background:var(--paper);color:var(--ink);font-family:var(--serif);overflow:hidden;
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+#book{position:relative;height:100%;perspective:2000px;overflow:hidden;touch-action:none}
+.page{position:absolute;inset:0;background:var(--paper);display:flex;flex-direction:column;
+  padding-block:20px 14px;padding-left:max(26px, env(safe-area-inset-left, 0px));padding-right:max(20px, env(safe-area-inset-right, 0px));
+  transform-origin:left center;backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.page::before{content:"";position:absolute;top:0;bottom:0;left:0;width:16px;pointer-events:none;
+  background:linear-gradient(to right,var(--spine),transparent)}
+.measure{visibility:hidden;pointer-events:none;z-index:-5}
+.head{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);letter-spacing:.25em;
+  border-bottom:.5px solid var(--rule);padding-bottom:7px}
+.body{position:relative;flex:1;min-height:0;overflow:hidden;padding-top:20px;display:flex;flex-direction:column;gap:14px}
+.foot{text-align:center;font-size:12px;color:var(--muted);letter-spacing:.3em;padding-top:10px}
+.post p{margin:0;font-size:16.5px;line-height:1.95;text-align:justify;text-indent:2em;letter-spacing:.02em;overflow-wrap:anywhere}
+.post p+p{margin-top:.35em}
+.post.cont p:first-child,.post.has-dc p:first-child{text-indent:0}
+.dc{float:left;font-size:3.05em;line-height:1;margin:.1em .14em 0 0;color:var(--accent);font-weight:600}
+.by{text-align:right;font-size:13px;color:var(--accent);margin-top:6px;letter-spacing:.1em;clear:both}
+.orn{text-align:center;color:var(--rule);font-size:11px;letter-spacing:.6em;margin:0;line-height:1}
+/* cover */
+.cover{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:34px;text-align:center}
+.ttl{border-top:.5px solid var(--rule);border-bottom:.5px solid var(--rule);padding:22px 8px;width:min(78%,300px)}
+.kicker{margin:0;font-size:11px;letter-spacing:.4em;color:var(--muted)}
+.ttl h1{margin:12px 0 10px;font-size:40px;font-weight:600;letter-spacing:.35em;text-indent:.35em}
+.sub{margin:0;font-size:13px;color:var(--muted);letter-spacing:.12em}
+form{display:flex;flex-direction:column;align-items:center;gap:14px;width:min(80%,300px)}
+label{font-size:12px;color:var(--muted);letter-spacing:.3em}
+input{width:100%;font:inherit;font-size:14px;color:var(--ink);background:transparent;border:0;border-bottom:.5px solid var(--rule);
+  padding:8px 2px;text-align:center;outline:none;-webkit-user-select:text;user-select:text}
+input:focus{border-bottom-color:var(--accent)}
+button{font:inherit;color:var(--ink);background:transparent;border:.5px solid var(--ink);border-radius:3px;padding:7px 26px;
+  font-size:14px;letter-spacing:.4em;text-indent:.4em;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outline-offset:3px}
+.alt{display:flex;gap:18px}
+.alt button,.link{border:0;padding:4px 2px;font-size:12px;letter-spacing:.15em;text-indent:0;color:var(--muted);
+  text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:4px}
+.err{min-height:1.4em;margin:0;font-size:12px;color:var(--accent);max-width:80%;line-height:1.6}
+.imprint{margin:0;font-size:11px;color:var(--muted);letter-spacing:.3em}
+.reader{font-size:14px;letter-spacing:.2em;margin:0}
+.hint{font-size:12px;color:var(--muted);letter-spacing:.3em;margin:0;animation:breathe 2.4s ease-in-out infinite}
+@keyframes breathe{50%{opacity:.35}}
+/* chapter */
+.chap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+.chap .no{margin:0;font-size:12px;letter-spacing:.5em;color:var(--muted)}
+.vdate{margin:6px 0;writing-mode:vertical-rl;font-size:36px;font-weight:600;letter-spacing:.3em}
+.chap .meta{margin:0;font-size:12px;letter-spacing:.2em;color:var(--muted)}
+.chap .yr{margin:18px 0 0;font-size:11px;letter-spacing:.3em;color:var(--muted)}
+/* turning */
+.sheen{position:absolute;inset:0;pointer-events:none;opacity:0;
+  background:linear-gradient(to left,var(--shade),transparent 70%)}
+.turn-out{z-index:4;animation:out .58s cubic-bezier(.35,.05,.25,1) forwards}
+.turn-out>.sheen{animation:fadein .58s forwards}
+.turn-in{z-index:4;animation:in .58s cubic-bezier(.35,.05,.25,1) forwards}
+.turn-in>.sheen{animation:fadeout .58s forwards}
+.under::after,.under-back::after{content:"";position:absolute;inset:0;background:var(--shade);pointer-events:none}
+.under::after{animation:fadeout .58s forwards}
+.under-back::after{opacity:0;animation:fadein .58s forwards}
+@keyframes out{to{transform:rotateY(-104deg)}}
+@keyframes in{from{transform:rotateY(-104deg)}to{transform:none}}
+@keyframes fadein{to{opacity:1}}
+@keyframes fadeout{from{opacity:1}to{opacity:0}}
+.fade-in{z-index:4;animation:fadeout .25s reverse forwards}
+@media (prefers-reduced-motion: reduce){.hint{animation:none}}
+/* chrome */
+.bar{position:absolute;top:0;left:0;right:0;z-index:10;background:var(--bar);border-bottom:.5px solid var(--rule);
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding-block:10px;padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px))}
+.bar .where{font-size:12px;color:var(--muted);letter-spacing:.15em}
+.bar .acts{display:flex;gap:14px}
+.toast{position:absolute;left:50%;bottom:44px;transform:translateX(-50%);z-index:11;background:var(--bar);
+  border:.5px solid var(--rule);border-radius:3px;padding:8px 16px;font-size:12px;letter-spacing:.15em;color:var(--muted);white-space:nowrap}
+.end{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+.end h2{margin:0;font-size:22px;font-weight:600;letter-spacing:.5em;text-indent:.5em}
+.end p{margin:0;font-size:12px;letter-spacing:.2em;color:var(--muted)}
+</style>
+
+</head>
+<body>
+<div id="book" aria-live="polite">
+  <div class="bar" id="bar" hidden>
+    <span class="where" id="where"></span>
+    <span class="acts">
+      <button class="link" id="toLatest">回到最新</button>
+      <button class="link" id="toCover">封面</button>
+      <button class="link" id="logout">换读者</button>
+    </span>
+  </div>
+  <div class="toast" id="toast" hidden></div>
+</div>
+
+<script>
+(() => {
+'use strict';
+/* ---------- 设置 ---------- */
+// 把你的 Baipiao 中继地址加在最前面，例如 'wss://baipiao.example.com'
+const DEFAULT_RELAYS = ['wss://relay.damus.io','wss://nos.lol','wss://relay.primal.net','wss://relay.nostr.band'];
+const LS = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} },
+  del(k){ try{ localStorage.removeItem(k); }catch(e){} }
+};
+const RELAYS = LS.get('book.relays', DEFAULT_RELAYS);
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- 中文数字与日期 ---------- */
+const D = '零一二三四五六七八九';
+function cn(n){
+  if (n < 10) return D[n];
+  if (n < 20) return '十' + (n % 10 ? D[n % 10] : '');
+  if (n < 100) return D[Math.floor(n/10)] + '十' + (n % 10 ? D[n % 10] : '');
+  if (n < 1000){ const h = Math.floor(n/100), r = n % 100;
+    return D[h] + '百' + (r === 0 ? '' : r < 10 ? '零' + D[r] : (r < 20 ? '一' : '') + cn(r)); }
+  const t = Math.floor(n/1000), r = n % 1000;
+  return D[t] + '千' + (r === 0 ? '' : r < 100 ? '零' + (r < 20 && r >= 10 ? '一' : '') + cn(r) : cn(r));
+}
+function cnDay(d){
+  if (d <= 10) return cn(d);
+  if (d < 20) return '十' + D[d-10];
+  if (d === 20) return '二十';
+  if (d < 30) return '廿' + D[d-20];
+  if (d === 30) return '三十';
+  return '卅一';
+}
+const yearCn = y => String(y).split('').map(c => '〇一二三四五六七八九'[+c]).join('');
+function dayKey(t){ const d = new Date(t*1000); return d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate(); }
+function keyParts(k){ const [y,m,d] = k.split('-').map(Number); return {y,m,d}; }
+const mdLabel = k => { const {m,d} = keyParts(k); return cn(m) + '月' + cnDay(d) + '日'; };
+
+/* ---------- npub 解码 ---------- */
+const CH = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+function toHex(s){
+  s = s.trim().toLowerCase().replace(/^nostr:/, '');
+  if (/^[0-9a-f]{64}$/.test(s)) return s;
+  if (!s.startsWith('npub1')) return null;
+  const vals = [];
+  for (const c of s.slice(5)){ const v = CH.indexOf(c); if (v < 0) return null; vals.push(v); }
+  let acc = 0, bits = 0; const out = [];
+  for (const v of vals.slice(0, -6)){
+    acc = (acc << 5) | v; bits += 5;
+    while (bits >= 8){ bits -= 8; out.push((acc >> bits) & 255); }
+    acc &= (1 << bits) - 1;
+  }
+  if (out.length !== 32) return null;
+  return out.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/* ---------- 中继查询 ---------- */
+let relayReached = false;
+function query(filters, timeout = 7000){
+  return new Promise(resolve => {
+    const evs = new Map(); let pending = RELAYS.length, done = false; const socks = [];
+    const sub = 'b' + Math.random().toString(36).slice(2, 9);
+    const finish = () => { if (done) return; done = true; clearTimeout(timer);
+      socks.forEach(w => { try{ w.close(); }catch(e){} }); resolve([...evs.values()]); };
+    const timer = setTimeout(finish, timeout);
+    RELAYS.forEach(url => {
+      let ended = false; const end = () => { if (ended) return; ended = true; if (--pending <= 0) finish(); };
+      let w; try { w = new WebSocket(url); } catch(e){ end(); return; }
+      socks.push(w);
+      w.onopen = () => { relayReached = true; try{ w.send(JSON.stringify(['REQ', sub, ...filters])); }catch(e){ end(); } };
+      w.onmessage = m => {
+        let d; try{ d = JSON.parse(m.data); }catch(e){ return; }
+        if (d[0] === 'EVENT' && d[1] === sub && d[2] && d[2].id){ if (!evs.has(d[2].id)) evs.set(d[2].id, d[2]); }
+        else if ((d[0] === 'EOSE' || d[0] === 'CLOSED') && d[1] === sub) end();
+      };
+      w.onerror = end; w.onclose = end;
+    });
+  });
+}
+const chunk = (a, n) => { const r = []; for (let i = 0; i < a.length; i += n) r.push(a.slice(i, i + n)); return r; };
+
+/* ---------- 昵称 ---------- */
+const names = LS.get('book.names', {});
+const nameOf = pk => names[pk] || ('无名氏·' + pk.slice(0, 4));
+async function ensureNames(pks){
+  const miss = [...new Set(pks)].filter(pk => !names[pk]);
+  if (!miss.length) return;
+  const res = await Promise.all(chunk(miss, 250).map(a => query([{kinds:[0], authors:a}], 5000)));
+  const best = {};
+  res.flat().forEach(e => { if (!best[e.pubkey] || best[e.pubkey].created_at < e.created_at) best[e.pubkey] = e; });
+  Object.values(best).forEach(e => {
+    try{ const c = JSON.parse(e.content); const n = (c.display_name || c.displayName || c.name || '').trim();
+      if (n) names[e.pubkey] = n.slice(0, 24); }catch(err){}
+  });
+  LS.set('book.names', names);
+}
+
+/* ---------- 正文清理：只留文字 ---------- */
+function clean(ev){
+  if (ev.kind !== 1) return null;
+  const tags = ev.tags || [];
+  if (tags.some(t => t[0] === 'content-warning')) return null;
+  if (tags.some(t => t[0] === 'e' && t[3] !== 'mention')) return null;           // 回复不收录
+  let s = (ev.content || '')
+    .replace(/(?:nostr:)?(?:npub|nprofile|note|nevent|naddr)1[02-9ac-hj-np-z]+/gi, '')
+    .replace(/https?:\/\/\S+/gi, '').replace(/\bwww\.\S+/gi, '')
+    .replace(/[ \t　]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{2,}/g, '\n').trim();
+  const core = s.replace(/[\s\p{P}\p{S}]/gu, '');
+  if (core.length < 4) return null;                                              // 太短的不收录
+  const paras = s.split('\n').map(x => x.trim()).filter(Boolean);
+  return { id: ev.id, pk: ev.pubkey, t: ev.created_at, paras };
+}
+
+/* ---------- 排版 ---------- */
+const book = document.getElementById('book');
+const M = document.createElement('div');
+M.className = 'page measure';
+M.innerHTML = '<div class="head"><span>时 间 线</span><span>十月廿九日</span></div><div class="body"></div><div class="foot">一</div>';
+book.appendChild(M);
+const MB = M.querySelector('.body');
+const overflows = () => MB.scrollHeight > MB.clientHeight + 1;
+
+function postEl(paras, author, {dc = false, cont = false, by = true} = {}){
+  const d = document.createElement('div'); d.className = 'post' + (cont ? ' cont' : '');
+  paras.forEach((tx, i) => {
+    const p = document.createElement('p');
+    if (i === 0 && dc && /^[㐀-鿿]/.test(tx)){
+      d.classList.add('has-dc');
+      const s = document.createElement('span'); s.className = 'dc'; s.textContent = tx[0];
+      p.append(s, tx.slice(1));
+    } else p.textContent = tx;
+    d.append(p);
+  });
+  if (by){ const b = document.createElement('div'); b.className = 'by'; b.textContent = '—— ' + author; d.append(b); }
+  return d;
+}
+function ornEl(){ const o = document.createElement('p'); o.className = 'orn'; o.textContent = '◇'; return o; }
+const toParas = s => s.split('\n').map(x => x.trim()).filter(Boolean);
+const BREAK = '。！？；，、：…!?;,. \n';
+
+function trySplit(paras, dc, cont){
+  const full = paras.join('\n');
+  let lo = 1, hi = full.length - 1, best = 0;
+  while (lo <= hi){
+    const mid = (lo + hi) >> 1;
+    const el = postEl(toParas(full.slice(0, mid)), '', {dc, cont, by:false});
+    MB.append(el); const ok = !overflows(); el.remove();
+    if (ok){ best = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  if (best < 14) return null;
+  for (let k = best; k > best - 26 && k > 10; k--){ if (BREAK.includes(full[k-1])){ best = k; break; } }
+  const rest = toParas(full.slice(best));
+  if (!rest.length) return null;
+  return { el: postEl(toParas(full.slice(0, best)), '', {dc, cont, by:false}), rest };
+}
+
+let pages = [], chapterNo = 0, days = [];
+let pageKey = '', pageAnchor = null;
+function flushPage(){
+  pages.push({ type:'text', key:pageKey, html:MB.innerHTML, anchor:pageAnchor });
+  MB.innerHTML = ''; pageAnchor = null;
+}
+function paginateDay(day){
+  chapterNo++;
+  pages.push({ type:'chap', no:chapterNo, key:day.key, count:day.posts.length,
+    authors:new Set(day.posts.map(p => p.pk)).size, anchor:day.posts[0].id });
+  pageKey = day.key; MB.innerHTML = ''; pageAnchor = null;
+  let first = true;
+  for (const p of day.posts){
+    let paras = p.paras, cont = false; const name = nameOf(p.pk);
+    for (let guard = 0; guard < 60; guard++){
+      const had = MB.childElementCount > 0;
+      const orn = had ? ornEl() : null; if (orn) MB.append(orn);
+      const el = postEl(paras, name, {dc: first && !cont, cont});
+      MB.append(el);
+      if (!overflows()){ if (!pageAnchor) pageAnchor = p.id; break; }
+      el.remove();
+      const used = orn ? orn.offsetTop + orn.offsetHeight : 0;
+      const free = MB.clientHeight - used;
+      const split = (!had || free > MB.clientHeight * 0.38) ? trySplit(paras, first && !cont, cont) : null;
+      if (split){ MB.append(split.el); if (!pageAnchor) pageAnchor = p.id; flushPage(); paras = split.rest; cont = true; continue; }
+      if (orn) orn.remove();
+      if (!had){ MB.append(el); if (!pageAnchor) pageAnchor = p.id; flushPage(); break; }
+      flushPage();
+    }
+    first = false;
+  }
+  if (MB.childElementCount) flushPage();
+}
+
+/* ---------- 数据加载 ---------- */
+let session = null, follows = [], cursor = 0, loading = false, exhausted = false, held = [], seen = new Set();
+let readerName = '';
+
+function groupDays(posts){
+  posts.sort((a, b) => b.t - a.t);
+  const out = [];
+  posts.forEach(p => { const k = dayKey(p.t); const last = out[out.length - 1];
+    if (last && last.key === k) last.posts.push(p); else out.push({ key:k, posts:[p] }); });
+  return out;
+}
+async function fetchBatch(){
+  if (session.demo) { const evs = demoEvents.filter(e => e.created_at <= cursor); cursor = 0; return evs; }
+  const now = Math.floor(Date.now() / 1000) + 600;
+  const res = await Promise.all(chunk(follows, 250).map(a => query([{ kinds:[1], authors:a, until:cursor, limit:150 }])));
+  const all = new Map(); let edge = 0, minAll = Infinity;
+  res.forEach(list => {
+    const ok = list.filter(e => e.created_at <= now);
+    if (!ok.length) return;
+    const mn = Math.min(...ok.map(e => e.created_at)); minAll = Math.min(minAll, mn);
+    if (list.length >= 120) edge = Math.max(edge, mn);
+    ok.forEach(e => all.set(e.id, e));
+  });
+  if (!all.size) return [];
+  const cut = edge || minAll;
+  cursor = cut - 1;
+  return [...all.values()].filter(e => e.created_at >= cut);
+}
+async function loadMore(){
+  if (loading || exhausted || !session) return;
+  loading = true;
+  try {
+    let added = 0;
+    for (let round = 0; round < 5 && !added; round++){
+      const evs = (await fetchBatch()).filter(e => !seen.has(e.id));
+      if (!evs.length){ exhausted = true; break; }
+      evs.forEach(e => seen.add(e.id));
+      const posts = evs.map(clean).filter(Boolean);
+      if (!session.demo) await ensureNames(posts.map(p => p.pk));
+      held = held.concat(posts);
+      const groups = groupDays(held);
+      held = groups.length ? groups.pop().posts : [];
+      groups.forEach(g => { days.push(g); paginateDay(g); added++; });
+      if (round === 4 && !added && held.length){ const g = { key: dayKey(held[0].t), posts: held }; held = []; days.push(g); paginateDay(g); added++; }
+    }
+    if (exhausted && held.length){ const g = { key: dayKey(held[0].t), posts: held }; held = []; days.push(g); paginateDay(g); }
+    if (exhausted && !pages.some(p => p.type === 'end')) pages.push({ type:'end' });
+  } finally { loading = false; }
+}
+
+/* ---------- 渲染 ---------- */
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let coverState = 'login', coverError = '';
+function coverHTML(){
+  const yr = yearCn(new Date().getFullYear());
+  const title = '<div class="ttl"><p class="kicker">NOSTR · 合集</p><h1>时间线</h1><p class="sub">把你关注的人，读成一本书</p></div>';
+  if (coverState === 'loading') return '<div class="cover">' + title + '<p class="hint">正在装订……</p><p class="imprint">' + yr + '年 · 初版</p></div>';
+  if (coverState === 'ready') return '<div class="cover">' + title +
+    '<p class="reader">读者　' + esc(readerName) + '</p><p class="hint">左滑翻开</p>' +
+    '<button class="link" id="switch">换一位读者</button><p class="imprint">' + yr + '年 · 初版</p></div>';
+  return '<div class="cover">' + title +
+    '<form id="login" novalidate><label for="npub">读 者 署 名</label>' +
+    '<input id="npub" placeholder="npub1…" autocomplete="off" autocapitalize="off" spellcheck="false" value="' + esc(LS.get('book.lastnpub', '')) + '">' +
+    '<button type="submit">翻开</button></form>' +
+    '<div class="alt"><button type="button" id="ext"' + (window.nostr ? '' : ' hidden') + '>用浏览器扩展登录</button>' +
+    '<button type="button" id="demo">先看示例</button></div>' +
+    '<p class="err" id="err">' + esc(coverError) + '</p><p class="imprint">' + yr + '年 · 初版</p></div>';
+}
+function render(i){
+  const pg = pages[i]; const el = document.createElement('div'); el.className = 'page';
+  if (pg.type === 'cover') el.innerHTML = coverHTML();
+  else if (pg.type === 'chap'){
+    const {y} = keyParts(pg.key);
+    el.innerHTML = '<div class="chap"><p class="no">第 ' + cn(pg.no) + ' 章</p><p class="vdate">' + mdLabel(pg.key) + '</p>' +
+      '<p class="orn">· ◇ ·</p><p class="meta">本日收录 ' + cn(pg.count) + ' 篇</p><p class="meta">执笔者 ' + cn(pg.authors) + ' 人</p>' +
+      '<p class="yr">' + yearCn(y) + '年</p></div>';
+  } else if (pg.type === 'text'){
+    el.innerHTML = '<div class="head"><span>时 间 线</span><span>' + mdLabel(pg.key) + '</span></div><div class="body">' + pg.html +
+      '</div><div class="foot">— ' + cn(i) + ' —</div>';
+  } else {
+    const n = days.reduce((a, d) => a + d.posts.length, 0);
+    el.innerHTML = '<div class="end"><p class="orn">· ◇ ·</p><h2>全书完</h2><p>共 ' + cn(chapterNo) + ' 章 · ' + cn(n) + ' 篇</p></div>';
+  }
+  const sh = document.createElement('i'); sh.className = 'sheen'; el.append(sh);
+  return el;
+}
+function bindCover(el){
+  const f = el.querySelector('#login');
+  if (f) f.addEventListener('submit', e => { e.preventDefault();
+    const v = el.querySelector('#npub').value; const hex = toHex(v);
+    if (!hex){ setErr('这不像一个 npub，请检查后再试。'); return; }
+    LS.set('book.lastnpub', v.trim()); start(hex);
+  });
+  const ext = el.querySelector('#ext');
+  if (ext) ext.addEventListener('click', async () => {
+    try{ const pk = await window.nostr.getPublicKey(); start(pk); }catch(e){ setErr('扩展没有给出公钥，请在扩展里允许后再试。'); }
+  });
+  const demo = el.querySelector('#demo'); if (demo) demo.addEventListener('click', () => start('demo', true));
+  const sw = el.querySelector('#switch'); if (sw) sw.addEventListener('click', logout);
+}
+function setErr(m){ coverError = m; const e = document.getElementById('err'); if (e) e.textContent = m; }
+
+/* ---------- 翻页 ---------- */
+let idx = 0, busy = false, curEl = null;
+const bar = document.getElementById('bar'), toastEl = document.getElementById('toast');
+function mount(el){ book.insertBefore(el, bar); }
+function after(){
+  if (pages[idx].type === 'cover') bindCover(curEl);
+  document.getElementById('where').textContent = idx === 0 ? '封面' : '第 ' + cn(idx) + ' 页';
+  if (session && !session.demo && pages[idx].anchor) LS.set('book.mark', pages[idx].anchor);
+  if (session && idx > 0 && idx >= pages.length - 4) loadMore().then(() => { if (pages[idx]) document.getElementById('where').textContent = idx === 0 ? '封面' : '第 ' + cn(idx) + ' 页'; });
+}
+function show(i){ if (curEl) curEl.remove(); idx = i; curEl = render(i); mount(curEl); after(); }
+let toastT;
+function toast(m){ toastEl.textContent = m; toastEl.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => toastEl.hidden = true, 1800); }
+function go(dir){
+  if (busy) return;
+  const j = idx + dir;
+  if (j < 0) return;
+  if (j >= pages.length){
+    if (!session) return;
+    if (!exhausted){ toast('正在取更早的篇章……'); loadMore(); }
+    return;
+  }
+  busy = true; bar.hidden = true;
+  const next = render(j), old = curEl;
+  const done = () => { old.remove(); next.className = 'page'; curEl = next; idx = j; busy = false; after(); };
+  if (reduce){ next.classList.add('fade-in'); mount(next); setTimeout(done, 260); return; }
+  if (dir > 0){ next.classList.add('under'); book.insertBefore(next, old); old.classList.add('turn-out'); }
+  else { next.classList.add('turn-in'); mount(next); old.classList.add('under-back'); }
+  setTimeout(done, 600);
+}
+
+/* 手势：左滑下一页、右滑上一页；点左右两侧翻页，点中间呼出工具栏 */
+let sx = 0, sy = 0, down = false;
+book.addEventListener('pointerdown', e => { if (e.target.closest('input,button,a,.bar')) { down = false; return; } down = true; sx = e.clientX; sy = e.clientY; });
+book.addEventListener('pointerup', e => {
+  if (!down) return; down = false;
+  const dx = e.clientX - sx, dy = e.clientY - sy;
+  if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) { go(dx < 0 ? 1 : -1); return; }
+  if (Math.abs(dx) < 10 && Math.abs(dy) < 10){
+    const w = book.clientWidth, x = e.clientX - book.getBoundingClientRect().left;
+    if (x > w * 0.68) go(1);
+    else if (x < w * 0.32) go(-1);
+    else if (session) bar.hidden = !bar.hidden;
+  }
+});
+document.addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input')) return;
+  if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown'){ e.preventDefault(); go(1); }
+  if (e.key === 'ArrowLeft' || e.key === 'PageUp'){ e.preventDefault(); go(-1); }
+});
+document.getElementById('toLatest').addEventListener('click', () => { bar.hidden = true; if (pages.length > 1) show(1); });
+document.getElementById('toCover').addEventListener('click', () => { bar.hidden = true; show(0); });
+document.getElementById('logout').addEventListener('click', () => { bar.hidden = true; logout(); });
+
+/* ---------- 会话 ---------- */
+function reset(){ pages = [{ type:'cover' }]; chapterNo = 0; days = []; held = []; seen = new Set(); exhausted = false; loading = false; follows = []; }
+function logout(){ session = null; LS.del('book.pk'); reset(); coverState = 'login'; coverError = ''; show(0); }
+async function start(pk, demo = false){
+  reset(); session = { pk, demo }; cursor = Math.floor(Date.now() / 1000);
+  coverState = 'loading'; coverError = ''; show(0);
+  if (demo){ buildDemo(); readerName = '示例读者'; }
+  else {
+    relayReached = false;
+    const c = await query([{ kinds:[3], authors:[pk], limit:3 }]);
+    if (!relayReached){ session = null; coverState = 'login';
+      coverError = '连不上中继。在预览里这个页面不能联网，部署到自己的网址后就能用；现在可以先看示例。'; show(0); return; }
+    const latest = c.sort((a, b) => b.created_at - a.created_at)[0];
+    follows = latest ? [...new Set(latest.tags.filter(t => t[0] === 'p' && /^[0-9a-f]{64}$/.test(t[1])).map(t => t[1]))].filter(x => x !== pk) : [];
+    if (!follows.length){ session = null; coverState = 'login'; coverError = '这个账号还没有关注任何人，书里暂时没有内容。'; show(0); return; }
+    LS.set('book.pk', pk);
+    await ensureNames([pk]); readerName = nameOf(pk);
+  }
+  await loadMore();
+  coverState = 'ready';
+  if (idx === 0) show(0);
+  if (pages.length > 1){
+    const mark = demo ? null : LS.get('book.mark', null);
+    const at = mark ? pages.findIndex(p => p.anchor === mark && p.type === 'text') : -1;
+    setTimeout(() => { if (at > 1) show(at); else go(1); }, 500);
+  }
+}
+
+/* 屏幕尺寸或字体变化时重新排版，停在原来那一页 */
+function repaginate(){
+  if (!days.length) return;
+  const a = pages[idx] && pages[idx].anchor, ty = pages[idx] && pages[idx].type;
+  pages = [{ type:'cover' }]; chapterNo = 0;
+  days.forEach(paginateDay);
+  if (exhausted) pages.push({ type:'end' });
+  let at = a ? pages.findIndex(p => p.anchor === a && p.type === ty) : -1;
+  if (at < 0) at = Math.min(idx, pages.length - 1);
+  show(at);
+}
+let rt; const later = () => { clearTimeout(rt); rt = setTimeout(repaginate, 250); };
+addEventListener('resize', later);
+if (document.fonts) document.fonts.addEventListener('loadingdone', later);
+
+/* ---------- 示例数据 ---------- */
+let demoEvents = [];
+function buildDemo(){
+  const people = { a:'晚舟', b:'远山', c:'白嫖', d:'林间', e:'阿七', f:'海内', g:'小满', h:'南风', i:'青禾', j:'鹿鸣' };
+  Object.entries(people).forEach(([k, n]) => names['demo' + k] = n);
+  const now = new Date(); now.setHours(Math.max(now.getHours(), 9), 0, 0, 0);
+  const base = Math.min(Math.floor(now.getTime() / 1000), Math.floor(Date.now() / 1000) - 60);
+  const H = 3600, DAY = 86400;
+  const raw = [
+    [0, 0.5, 'a', '雾一直没散。阿苏山下那杯咖啡，喝到最后还是温的。'],
+    [0, 1.2, 'b', '秋雨适合翻旧书。翻到一张夹在里面的电影票，十年前的，座位是七排九号，和谁去的已经想不起来了。'],
+    [0, 2.0, 'c', '去中心化从来不是目的，能自由地说话才是。 https://example.com/post/123'],
+    [0, 3.1, 'd', '今天把阳台的薄荷剪了一半，泡了一壶茶。剩下的一半留给明年。'],
+    [0, 3.5, 'e', '早'],
+    [0, 4.4, 'f', '第一次在凌晨四点起床去看日出。山路很黑，只有前面的人手电筒晃来晃去。\n到了山顶风很大，大家都缩在一起不说话。天边先是灰的，然后发青，再然后一下子就红了，红得像有人把整片天点着。\n旁边一位老人家说他每年这一天都来，来了二十年，今年是最后一次，因为膝盖不行了。说完他把保温杯里的姜茶倒给我们，每人一小口。\n下山的时候我一直在想，一件事情做二十年是什么感觉。大概就像日出，每天都一样，每天又都不一样。'],
+    [0, 5.6, 'g', 'nostr:npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqhsvq 说得对，慢慢来，比较快。'],
+    [0, 7.0, 'h', '地铁上有个小孩一直在数窗外的灯，数到一百就重新数。'],
+    [1, 1.0, 'i', '在旧货市场买了一台打字机，色带已经干了，敲出来的字很淡，像从很远的地方寄来的信。'],
+    [1, 2.5, 'a', '店里今天来了一位客人，点了一杯热可可，坐了三个小时，看完一整本书才走。临走前说，这是他这个月最安静的一个下午。'],
+    [1, 3.2, 'b', '人到中年，最大的奢侈是一个没有安排的周日。'],
+    [1, 4.8, 'j', '学了半年大提琴，今天第一次拉完整首曲子。错了好几个音，但是猫没有跑掉。'],
+    [1, 6.0, 'c', '写了一个晚上的代码，最后发现问题出在一个多余的空格上。'],
+    [1, 8.5, 'd', '风把楼下的银杏吹黄了一半。'],
+    [2, 0.8, 'f', '给远方的朋友寄了一包今年的新茶，附了一张纸条：喝的时候想想我。'],
+    [2, 2.2, 'h', '傍晚的海边只剩下我和一只狗。它追浪，我追它。'],
+    [2, 3.9, 'g', '今天才知道，楼下的风铃在下雨天响得特别好听。雨声把别的声音都盖住了，只剩下它。'],
+    [2, 5.0, 'i', '整理书架，发现有三本书买了两次。看来我是真的很喜欢它们，也是真的忘了。'],
+    [2, 7.3, 'j', '失眠的夜里，听见邻居家的钟一下一下地敲了三点。']
+  ];
+  demoEvents = raw.map(([d, h, who, text], n) => ({ id:'demo' + n, kind:1, pubkey:'demo' + who, created_at: base - d * DAY - Math.round(h * H), tags:[], content:text }));
+}
+
+/* ---------- 启动 ---------- */
+reset();
+const ready = document.fonts ? document.fonts.ready : Promise.resolve();
+ready.then(() => {
+  const saved = LS.get('book.pk', null);
+  if (saved) start(saved); else show(0);
+});
+if ('serviceWorker' in navigator && location.protocol === 'https:' && document.querySelector('link[rel="manifest"]')){
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+})();
+</script>
+
+</body>
+</html>

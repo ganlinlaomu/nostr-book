@@ -1,10 +1,17 @@
 {
-  "name": "驿书",
-  "short_name": "驿书",
+  "name": "YISHU",
+  "short_name": "YISHU",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f3ecdc",
   "theme_color": "#f3ecdc",
-  "icons": [{ "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }]
+  "icons": [
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
 }

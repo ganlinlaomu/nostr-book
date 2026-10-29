@@ -399,6 +399,10 @@ function paginateDay(day){
 
 /* ---------- 数据加载 ---------- */
 let session = null, follows = [], cursor = 0, loading = false, exhausted = false, held = [], seen = new Set();
+// The reader's own notes are always part of the book, independent of kind-3 follows.
+function feedAuthors(){
+  return session && !session.demo ? [...new Set([session.pk,...follows])] : follows.slice();
+}
 let readerName = '';
 
 function groupDays(posts){
@@ -411,7 +415,7 @@ function groupDays(posts){
 async function fetchBatch(){
   if (session.demo) { const evs = demoEvents.filter(e => e.created_at <= cursor); cursor = 0; return evs; }
   const now = Math.floor(Date.now() / 1000) + 600;
-  const res = await Promise.all(chunk(follows, 250).map(a => query([{ kinds:CONTENT_KINDS, authors:a, until:cursor, limit:150 }], 8000)));
+  const res = await Promise.all(chunk(feedAuthors(), 250).map(a => query([{ kinds:CONTENT_KINDS, authors:a, until:cursor, limit:150 }], 8000)));
   const all = new Map(); let edge = 0, minAll = Infinity;
   res.forEach(list => {
     const ok = list.filter(e => e.created_at <= now);
@@ -458,7 +462,8 @@ let hiddenAt = 0, lastFollowsCheck = 0;
 const BACKFILL_OVERLAP = 3600;     // 回看一小时，补齐延迟传播和临时掉线的事件
 const FOLLOW_REFRESH_MS = 5 * 60000;
 const FOLLOW_HISTORY = 7 * 86400;
-let pendingFollowBackfill = new Map(), commentsBackfillNeeded = false;
+const SELF_HISTORY = 30 * 86400;
+let pendingFollowBackfill = new Map(), commentsBackfillNeeded = false, selfBackfillNeeded = false;
 const relayHints = LS.get('book.relayHints.v1', {});
 const relayHintChecked = LS.get('book.relayHintChecked.v1', {});
 let findingRelayHints = false;
@@ -475,8 +480,9 @@ function normalizedRelay(s){
 }
 function relayPlans(){
   const primary = [...new Set(RELAYS.map(normalizedRelay).filter(Boolean))];
+  const authors = feedAuthors();
   const extras = new Map();
-  for (const pk of follows){
+  for (const pk of authors){
     for (const url of (relayHints[pk] || [])){
       if (primary.includes(url)) continue;
       if (!extras.has(url)) extras.set(url,new Set());
@@ -484,7 +490,7 @@ function relayPlans(){
     }
   }
   const ranked = [...extras].sort((a,b) => b[1].size - a[1].size).slice(0,8);
-  return [...primary.map(url => ({url,authors:follows.slice()})),
+  return [...primary.map(url => ({url,authors:authors.slice()})),
     ...ranked.map(([url,authors]) => ({url,authors:[...authors]}))];
 }
 async function refreshRelayHints(){
@@ -549,10 +555,11 @@ function queueFresh(events){
   if (!session || session.demo) return;
   const now = Math.floor(Date.now() / 1000) + 600;
   const have = new Set(fresh.map(p => p.id));
+  const allowed = new Set(feedAuthors());
   let added = 0;
   for (const ev of events){
     if (!ev || !CONTENT_KINDS.includes(ev.kind) || !Number.isFinite(ev.created_at) || ev.created_at > now ||
-        !follows.includes(ev.pubkey) || seen.has(ev.id) || have.has(ev.id)) continue;
+        !allowed.has(ev.pubkey) || seen.has(ev.id) || have.has(ev.id)) continue;
     const post = clean(ev);
     if (!post) continue;
     fresh.push(post); have.add(post.id); added++;
@@ -570,7 +577,7 @@ function queueFresh(events){
   }, 600);
 }
 async function checkFresh(auto = false){
-  if (!session || session.demo || checking || !follows.length ||
+  if (!session || session.demo || checking || !feedAuthors().length ||
       document.visibilityState !== 'visible') return;
   const sess = session;
   checking = true;
@@ -589,6 +596,9 @@ async function checkFresh(auto = false){
         tasks.push({url:plan.url,authors,since:Math.max(0,untilNow-FOLLOW_HISTORY)});
       if (commentsBackfillNeeded) for (const authors of chunk(plan.authors,50))
         tasks.push({url:plan.url,authors,since:Math.max(0,untilNow-FOLLOW_HISTORY)});
+      // Existing cached books did not previously contain their owner's notes.
+      if (selfBackfillNeeded && plan.authors.includes(sess.pk))
+        tasks.push({url:plan.url,authors:[sess.pk],since:Math.max(0,untilNow-SELF_HISTORY)});
     }
     const batches = await Promise.all(tasks.map(async task => {
       const collected = new Map();
@@ -619,6 +629,10 @@ async function checkFresh(auto = false){
     if (commentsBackfillNeeded) {
       commentsBackfillNeeded = false;
       LS.set('book.commentsBackfilled.v1.'+sess.pk, true);
+    }
+    if (selfBackfillNeeded) {
+      selfBackfillNeeded = false;
+      LS.set('book.selfBackfilled.v1.'+sess.pk, true);
     }
     if (auto && fresh.length && idx <= 2){ clearTimeout(flushTimer); flushTimer = null; applyFresh(); }
   } catch(e) {
@@ -664,7 +678,7 @@ function scheduleReconnect(url, epoch, authors, attempt){
 }
 function startLive(){
   stopLive();
-  if (!session || session.demo || !follows.length || document.visibilityState !== 'visible') return;
+  if (!session || session.demo || !feedAuthors().length || document.visibilityState !== 'visible') return;
   const epoch = liveEpoch;
   relayPlans().forEach(p => connectLive(p.url, epoch, p.authors));
 }
@@ -812,7 +826,7 @@ document.getElementById('syncNow').addEventListener('click', async () => {
   if (!updated) { toast('关注列表暂不可用，仍使用本地记录'); return; }
   await refreshRelayHints();
   await checkFresh(true);
-  if (session === current) toast('关注 ' + follows.length + ' 人 · 已发起动态与评论同步');
+  if (session === current) toast('已同步自己的动态及关注 ' + follows.length + ' 人');
 });
 book.addEventListener('click', e => {
   if (e.target.closest('.head .home')) { bar.hidden = true; show(0); }
@@ -822,11 +836,12 @@ document.getElementById('toCover').addEventListener('click', () => { bar.hidden 
 document.getElementById('logout').addEventListener('click', () => { bar.hidden = true; logout(); });
 
 /* ---------- 会话 ---------- */
-function reset(){ stopLive(); clearTimeout(flushTimer); flushTimer = null; fresh = []; applyPending = false; checking = false; pendingFollowBackfill = new Map(); commentsBackfillNeeded = false; findingRelayHints = false; lastCheck = 0; lastFollowsCheck = 0; pages = [{ type:'cover' }]; chapterNo = 0; days = []; held = []; seen = new Set(); exhausted = false; loading = false; follows = []; updateDot(); }
+function reset(){ stopLive(); clearTimeout(flushTimer); flushTimer = null; fresh = []; applyPending = false; checking = false; pendingFollowBackfill = new Map(); commentsBackfillNeeded = false; selfBackfillNeeded = false; findingRelayHints = false; lastCheck = 0; lastFollowsCheck = 0; pages = [{ type:'cover' }]; chapterNo = 0; days = []; held = []; seen = new Set(); exhausted = false; loading = false; follows = []; updateDot(); }
 function logout(){ session = null; LS.del('book.pk'); LS.del(CACHE_KEY); reset(); coverState = 'login'; coverError = ''; show(0); }
 async function start(pk, demo = false){
   reset(); session = { pk, demo }; cursor = Math.floor(Date.now() / 1000);
   commentsBackfillNeeded = !demo && !LS.get('book.commentsBackfilled.v1.'+pk,false);
+  selfBackfillNeeded = !demo && !LS.get('book.selfBackfilled.v1.'+pk,false);
   coverState = 'loading'; coverError = ''; show(0);
   if (demo){ buildDemo(); readerName = '示例读者'; }
   else {
@@ -840,7 +855,7 @@ async function start(pk, demo = false){
       coverError = '连不上中继。在预览里这个页面不能联网，部署到自己的网址后就能用；现在可以先看示例。'; show(0); return; }
     const latest = c.sort((a, b) => b.created_at - a.created_at)[0];
     follows = latest ? [...new Set(latest.tags.filter(t => t[0] === 'p' && /^[0-9a-f]{64}$/.test(t[1])).map(t => t[1]))].filter(x => x !== pk) : [];
-    if (!follows.length){ session = null; coverState = 'login'; coverError = c.length ? '这个账号还没有关注任何人，书里暂时没有内容。' : '没从中继取到这个账号的关注列表，可能是网络不稳，请再试一次。'; show(0); return; }
+    // An account with no follows can still read its own posts and comments.
     LS.set('book.pk', pk);
     await ensureNames([pk]); readerName = nameOf(pk);
   }
@@ -869,6 +884,7 @@ function restore(pk){
   if (!c || c.v !== 1 || c.pk !== pk || !Array.isArray(c.posts) || !c.posts.length) return false;
   reset(); session = { pk, demo:false };
   commentsBackfillNeeded = !LS.get('book.commentsBackfilled.v1.'+pk,false);
+  selfBackfillNeeded = !LS.get('book.selfBackfilled.v1.'+pk,false);
   follows = c.follows || []; cursor = c.cursor; exhausted = !!c.exhausted; held = c.held || [];
   c.posts.concat(held).forEach(p => seen.add(p.id));
   days = groupDays(c.posts.slice());
@@ -950,6 +966,13 @@ function buildDemo(){
 
 /* ---------- 启动 ---------- */
 window.bookWriterReader = () => session && !session.demo ? session.pk : null;
+// Only accept the writer's successfully published event for the current identity.
+// All NIP-10 / NIP-22 comments still pass the shared 20-Han clean() filter.
+window.addEventListener('nostr-book:published', e => {
+  const event = e.detail;
+  if (!session || session.demo || !event || event.pubkey !== session.pk) return;
+  queueFresh([event]);
+});
 reset();
 const ready = document.fonts ? document.fonts.ready : Promise.resolve();
 ready.then(() => {

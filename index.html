@@ -59,15 +59,12 @@ body{height:100%;margin:0;background:var(--paper);color:var(--ink);font-family:v
 .ill.wrap{float:right;width:47%;aspect-ratio:4/5;margin:.35em -4px .3em .7em;
   shape-outside:ellipse(47% 49% at 50% 50%);shape-margin:4px}
 .ill img{display:block;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .7s ease;
-  filter:grayscale(1) sepia(.5) contrast(1.18) brightness(1.06);mix-blend-mode:multiply;
+  filter:contrast(1.12) url(#ink-light);
   -webkit-mask-size:100% 100%;mask-size:100% 100%;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat}
-.ill img.ok{opacity:.92}
+.ill img.ok{opacity:1}
 .ill.gone{display:none}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .ill img{
-  filter:grayscale(1) sepia(.4) contrast(1.05) brightness(.72);mix-blend-mode:normal}
-  :root:not([data-theme="light"]) .ill img.ok{opacity:.85}}
-:root[data-theme="dark"] .ill img{filter:grayscale(1) sepia(.4) contrast(1.05) brightness(.72);mix-blend-mode:normal}
-:root[data-theme="dark"] .ill img.ok{opacity:.85}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .ill img{filter:contrast(1.08) url(#ink-dark)}}
+:root[data-theme="dark"] .ill img{filter:contrast(1.08) url(#ink-dark)}
 .orn{text-align:center;color:var(--rule);font-size:11px;letter-spacing:.6em;margin:0;line-height:1}
 /* cover */
 .cover{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:34px;text-align:center}
@@ -159,6 +156,15 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
 
 </head>
 <body>
+<!-- 插画双色：亮度映射到“墨色→纸色”，白处正好是纸色，不靠混合模式 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <filter id="ink-light" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" values=".1675 .5636 .0569 0 .165  .1658 .5579 .0563 0 .145  .1584 .5328 .0538 0 .118  0 0 0 1 0"/>
+  </filter>
+  <filter id="ink-dark" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" values=".1293 .4348 .0439 0 .114  .1218 .4098 .0414 0 .098  .1067 .3590 .0362 0 .078  0 0 0 1 0"/>
+  </filter>
+</svg>
 <div id="book" aria-live="polite">
   <div class="bar" id="bar" hidden>
     <span class="where" id="where"></span>

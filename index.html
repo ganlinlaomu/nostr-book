@@ -171,6 +171,7 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
 .writer-status{font-size:12px;line-height:1.7;color:var(--accent);white-space:normal;overflow-wrap:anywhere;margin:0}
 .writer-status:empty{display:none}
 .writer-status.error{color:#b44a39}
+.writer-panel .writer-subtle{border:0;font-size:12px;color:var(--muted);letter-spacing:.1em;text-decoration:underline;text-underline-offset:4px;padding:4px 0}
 .writer-panel{border-top:.5px solid var(--rule);display:flex;flex-direction:column;gap:12px;padding-top:16px}
 .writer-panel h3{font-weight:400;font-size:14px;margin:0;letter-spacing:.12em}
 .writer-panel p{margin:0;color:var(--muted);font-size:12px;line-height:1.8}
@@ -226,6 +227,7 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
       <input id="writerNewPass" type="password" placeholder="加密密码（至少 12 字符）" autocomplete="new-password" aria-label="设置加密密码">
       <input id="writerNewPassConfirm" type="password" placeholder="确认密码" autocomplete="new-password" aria-label="确认加密密码">
       <button type="button" id="writerSaveKey">保存私钥</button>
+      <button type="button" id="writerFaceIdOff" class="writer-subtle" hidden>关闭 Face ID 解锁</button>
     </section>
     <section class="writer-panel" id="writerUnlock" hidden>
       <h3>解锁发表</h3>
@@ -237,6 +239,7 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
     <footer class="writer-foot">
       <span class="writer-meta" id="writerSaved" aria-live="polite">已保存</span>
       <div class="writer-footer-actions">
+        <button type="button" id="writerFaceId" hidden>启用 Face ID</button>
         <button type="button" id="writerImport">私钥</button>
         <button type="button" id="writerPublished" hidden>返回阅读</button>
       </div>

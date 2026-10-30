@@ -33,7 +33,7 @@
 html{box-sizing:border-box;height:100%}
 *,*::before,*::after{box-sizing:inherit}
 body{height:100%;margin:0;background:var(--paper);color:var(--ink);font-family:var(--serif);overflow:hidden;
-  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
 #book{position:relative;height:100%;perspective:2000px;overflow:hidden;touch-action:none}
 .page{position:absolute;inset:0;background:var(--paper);display:flex;flex-direction:column;
   padding-block:20px 14px;padding-left:max(26px, env(safe-area-inset-left, 0px));padding-right:max(20px, env(safe-area-inset-right, 0px));
@@ -47,6 +47,7 @@ body{height:100%;margin:0;background:var(--paper);color:var(--ink);font-family:v
 .foot{text-align:center;font-size:12px;color:var(--muted);letter-spacing:.3em;padding-top:10px}
 .post p{margin:0;font-size:16.5px;line-height:1.95;text-align:justify;text-indent:2em;letter-spacing:.02em;overflow-wrap:anywhere}
 .post p+p{margin-top:.35em}
+.post.comment[data-to]:not(.cont)::before{content:"评论 · 回" attr(data-to)}
 .post.comment:not(.cont)::before{content:"评论";display:block;font-size:11px;letter-spacing:.18em;color:var(--accent);margin-bottom:4px}
 .post.comment.cont::before{content:"续评";display:block;font-size:10px;letter-spacing:.15em;color:var(--muted);margin-bottom:4px}
 .post p.q{text-indent:0;margin-left:1em;padding-left:.8em;border-left:2px solid var(--rule);color:var(--muted)}
@@ -65,6 +66,22 @@ body{height:100%;margin:0;background:var(--paper);color:var(--ink);font-family:v
 .ill.gone{display:none}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .ill img{filter:contrast(1.08) url(#ink-dark)}}
 :root[data-theme="dark"] .ill img{filter:contrast(1.08) url(#ink-dark)}
+/* 回复：长按一篇内容浮出小纸条；不影响点按翻页 */
+.post.held{background:color-mix(in srgb, var(--rule) 22%, transparent);border-radius:3px;box-shadow:0 0 0 6px color-mix(in srgb, var(--rule) 22%, transparent)}
+.reply-pop{position:absolute;z-index:13;display:flex;gap:2px;background:var(--bar);border:.5px solid var(--rule);border-radius:3px;
+  box-shadow:0 2px 14px rgba(0,0,0,.1);padding:2px 4px}
+.reply-pop button{border:0;font-size:13px;letter-spacing:.2em;text-indent:.2em;padding:7px 14px;color:var(--accent)}
+.reply-pick{position:absolute;inset:auto 0 0 0;z-index:14;background:var(--bar);border-top:.5px solid var(--rule);
+  padding:14px max(18px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px));
+  display:flex;flex-direction:column;gap:2px;box-shadow:0 -4px 18px rgba(0,0,0,.08)}
+.reply-pick p{margin:0 0 6px;font-size:12px;letter-spacing:.2em;color:var(--muted)}
+.reply-pick button{border:0;border-bottom:.5px solid var(--rule);border-radius:0;text-align:left;text-indent:0;letter-spacing:.02em;
+  font-size:14px;padding:10px 2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.reply-pick button:last-child{border-bottom:0;color:var(--muted);text-align:center;letter-spacing:.3em}
+.writer-quote{margin:0;padding:2px 0 2px .9em;border-left:2px solid var(--rule);color:var(--muted);font-size:14px;line-height:1.85}
+.writer-quote b{display:block;font-weight:400;font-size:12px;letter-spacing:.15em;color:var(--accent);margin-bottom:2px}
+.writer-quote span{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.writer-hint{margin:0;font-size:12px;color:var(--muted);letter-spacing:.05em}
 .orn{text-align:center;color:var(--rule);font-size:11px;letter-spacing:.6em;margin:0;line-height:1}
 /* cover */
 .cover{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:34px;text-align:center}
@@ -170,6 +187,7 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
     <span class="where" id="where"></span>
     <span class="acts">
       <button class="link" id="writePost" type="button">写</button>
+      <button class="link" id="replyPage" type="button">回复</button>
       <button class="link" id="syncNow">同步</button>
       <button class="link" id="toLatest">回到最新</button>
       <button class="link" id="toCover">封面</button>
@@ -178,6 +196,8 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
   </div>
   <button type="button" class="new-posts" id="newPosts" aria-live="polite" hidden></button>
   <div class="toast" id="toast" hidden></div>
+  <div class="reply-pop" id="replyPop" hidden><button type="button" id="replyGo">回复</button></div>
+  <div class="reply-pick" id="replyPick" hidden></div>
 </div>
 <section class="writer-overlay" id="writerOverlay" role="dialog" aria-modal="true" aria-labelledby="writerTitle" hidden>
   <div class="writer-paper">
@@ -186,6 +206,7 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
       <h2 id="writerTitle">随笔</h2>
       <button type="button" id="writerPublish" class="writer-publish">发表</button>
     </header>
+    <blockquote class="writer-quote" id="writerQuote" hidden><b id="writerQuoteWho"></b><span id="writerQuoteText"></span></blockquote>
     <textarea id="writerText" class="writer-text" placeholder="写点什么……" maxlength="12000" spellcheck="true" aria-label="随笔正文"></textarea>
     <section class="writer-panel" id="writerSetup" hidden>
       <h3>设置私钥</h3>
@@ -200,6 +221,7 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
       <input id="writerUnlockPass" type="password" placeholder="解锁密码" autocomplete="off" aria-label="私钥解锁密码">
       <button type="button" id="writerSend">确认发表</button>
     </section>
+    <p class="writer-hint" id="writerHint" hidden></p>
     <p id="writerStatus" class="writer-status" role="status" aria-live="polite"></p>
     <footer class="writer-foot">
       <span class="writer-meta" id="writerSaved" aria-live="polite">已保存</span>
@@ -340,8 +362,23 @@ function clean(ev){
   // Only count the commenter's own Han characters, not quoted parent content.
   if (hanCount(s.split('\n')) < MIN_HAN) return null;
   if (s.replace(/[\s\p{P}\p{S}]/gu, '').length < 4) return null;
+  const extra = {};
+  if (ev.kind !== 1) extra.k = ev.kind;
+  if (comment){
+    const to = replyTarget(ev, tags); if (to) extra.to = to;
+    if (ev.kind === 1111){ const root = tags.filter(t => ['E','K','P','A','I'].includes(t[0])).slice(0, 8); if (root.length) extra.root = root; }
+  }
   return { id: ev.id, pk: ev.pubkey, t: ev.created_at,
-    paras:s.split('\n').map(x=>x.trim()).filter(Boolean), comment, ...(img ? { img } : {}) };
+    paras:s.split('\n').map(x=>x.trim()).filter(Boolean), comment, ...(img ? { img } : {}), ...extra };
+}
+// 这条评论在回谁：NIP-22 看小写 p；NIP-10 先看 reply/root 标记里带的公钥，再退回最后一个 p
+function replyTarget(ev, tags){
+  const hex = v => /^[0-9a-f]{64}$/.test(v || '') ? v : null;
+  if (ev.kind === 1111) return hex((tags.find(t => t[0] === 'p') || [])[1]);
+  const e = tags.find(t => t[0] === 'e' && t[3] === 'reply') || tags.find(t => t[0] === 'e' && t[3] === 'root');
+  if (e && hex(e[4])) return e[4];
+  const ps = tags.filter(t => t[0] === 'p' && hex(t[1]) && t[1] !== ev.pubkey);
+  return ps.length ? ps[ps.length - 1][1] : null;
 }
 // 动态里的第一张静态图（不要 gif）：先看 imeta 标签，再看正文里的链接
 const IMG_URL = /https?:\/\/[^\s<>"']+?\.(?:jpe?g|png|webp|avif)(?:\?[^\s<>"']*)?(?=$|[\s<>"'])/i;
@@ -364,9 +401,10 @@ book.appendChild(M);
 const MB = M.querySelector('.body');
 const overflows = () => MB.scrollHeight > MB.clientHeight + 1;
 
-function postEl(paras, pk, {dc = false, cont = false, by = true, comment = false, ill = null} = {}){
+function postEl(paras, pk, {dc = false, cont = false, by = true, comment = false, ill = null, post = null} = {}){
   paras = paras.map(x => noEmoji(x).trim()).filter(Boolean);       // 本地存档里的旧文字也去掉 emoji
   const d = document.createElement('div'); d.className = 'post' + (cont ? ' cont' : '') + (comment ? ' comment' : '');
+  if (post){ d.dataset.id = post.id; d.dataset.pk = post.pk; if (post.to) d.dataset.toPk = post.to; }
   if (ill) d.append(illEl(ill, paras.join('').length > 90));
   paras.forEach((tx, i) => {
     const p = document.createElement('p');
@@ -400,12 +438,12 @@ function ornEl(){ const o = document.createElement('p'); o.className = 'orn'; o.
 const toParas = s => s.split('\n').map(x => x.trim()).filter(Boolean);
 const BREAK = '。！？；，、：…!?;,. \n';
 
-function trySplit(paras, dc, cont, comment = false, ill = null){
+function trySplit(paras, dc, cont, comment = false, ill = null, post = null){
   const full = paras.join('\n');
   let lo = 1, hi = full.length - 1, best = 0;
   while (lo <= hi){
     const mid = (lo + hi) >> 1;
-    const el = postEl(toParas(full.slice(0, mid)), '', {dc, cont, by:false, comment, ill});
+    const el = postEl(toParas(full.slice(0, mid)), '', {dc, cont, by:false, comment, ill, post});
     MB.append(el); const ok = !overflows(); el.remove();
     if (ok){ best = mid; lo = mid + 1; } else hi = mid - 1;
   }
@@ -413,7 +451,7 @@ function trySplit(paras, dc, cont, comment = false, ill = null){
   for (let k = best; k > best - 26 && k > 10; k--){ if (BREAK.includes(full[k-1])){ best = k; break; } }
   const rest = toParas(full.slice(best));
   if (!rest.length) return null;
-  return { el: postEl(toParas(full.slice(0, best)), '', {dc, cont, by:false, comment, ill}), rest };
+  return { el: postEl(toParas(full.slice(0, best)), '', {dc, cont, by:false, comment, ill, post}), rest };
 }
 
 let pages = [], chapterNo = 0, days = [];
@@ -436,13 +474,13 @@ function paginateDay(day){
       const had = MB.childElementCount > 0;
       const orn = had ? ornEl() : null; if (orn) MB.append(orn);
       const ill = (!cont && p.img && pages.length - illAt >= ILL_GAP) ? p.img : null;
-      const el = postEl(paras, p.pk, {dc: first && !cont && !p.comment, cont, comment:!!p.comment, ill});
+      const el = postEl(paras, p.pk, {dc: first && !cont && !p.comment, cont, comment:!!p.comment, ill, post:p});
       MB.append(el);
       if (!overflows()){ if (!pageAnchor) pageAnchor = p.id; if (ill) illAt = pages.length; break; }
       el.remove();
       const used = orn ? orn.offsetTop + orn.offsetHeight : 0;
       const free = MB.clientHeight - used;
-      const split = (!had || free > MB.clientHeight * 0.38) ? trySplit(paras, first && !cont && !p.comment, cont, !!p.comment, ill) : null;
+      const split = (!had || free > MB.clientHeight * 0.38) ? trySplit(paras, first && !cont && !p.comment, cont, !!p.comment, ill, p) : null;
       if (split){ MB.append(split.el); if (!pageAnchor) pageAnchor = p.id; if (ill) illAt = pages.length; flushPage(); paras = split.rest; cont = true; continue; }
       if (orn) orn.remove();
       if (!had){ MB.append(el); if (!pageAnchor) pageAnchor = p.id; if (ill) illAt = pages.length; flushPage(); break; }
@@ -797,6 +835,7 @@ function render(i){
   }
   el.querySelectorAll('.by[data-pk]').forEach(b => { b.textContent = '—— ' + nameOf(b.dataset.pk); });  // 昵称晚到也能补上
   el.querySelectorAll('.ill img[data-src]').forEach(im => { im.src = im.dataset.src; });
+  el.querySelectorAll('.post.comment[data-to-pk]').forEach(d => { d.dataset.to = nameOf(d.dataset.toPk); });
   const sh = document.createElement('i'); sh.className = 'sheen'; el.append(sh);
   return el;
 }
@@ -838,6 +877,7 @@ function after(){
 let turnNo = 0;
 function show(i){
   turnNo++; busy = false;
+  document.getElementById('replyPop').hidden = true; document.getElementById('replyPick').hidden = true;
   book.querySelectorAll('.page:not(.measure)').forEach(e => e.remove());
   idx = i; curEl = render(i); mount(curEl); after();
 }
@@ -864,8 +904,63 @@ function go(dir){
 
 /* 手势：左滑下一页、右滑上一页；点左右两侧翻页，点中间呼出工具栏 */
 let sx = 0, sy = 0, down = false;
-book.addEventListener('pointerdown', e => { if (e.target.closest('input,button,a,.bar')) { down = false; return; } down = true; sx = e.clientX; sy = e.clientY; });
+let holdTimer = null;
+const replyPop = document.getElementById('replyPop'), replyPick = document.getElementById('replyPick');
+function hideReplyUI(){
+  replyPop.hidden = true; replyPick.hidden = true;
+  book.querySelectorAll('.post.held').forEach(p => p.classList.remove('held'));
+}
+function postInfo(id){
+  for (const d of days) for (const p of d.posts) if (p.id === id) return p;
+  return null;
+}
+function openReply(id){
+  const p = postInfo(id); hideReplyUI(); bar.hidden = true;
+  if (!p) return;
+  window.dispatchEvent(new CustomEvent('nostr-book:reply', { detail: {
+    id: p.id, pk: p.pk, kind: p.k || 1, root: p.root || null, name: nameOf(p.pk),
+    text: p.paras.map(noEmoji).join(' ').slice(0, 160), relays: (relayHints[p.pk] || []).slice(0, 3) } }));
+}
+book.addEventListener('pointerdown', e => {
+  clearTimeout(holdTimer);
+  if (!replyPop.hidden || !replyPick.hidden){            // 先收起回复小纸条，这一下不翻页
+    if (!e.target.closest('.reply-pop,.reply-pick')){ hideReplyUI(); down = false; }
+    return;
+  }
+  if (e.target.closest('input,button,a,.bar')) { down = false; return; }
+  down = true; sx = e.clientX; sy = e.clientY;
+  const post = e.target.closest('.page:not(.measure) .post[data-id]');
+  if (post && session && !session.demo && !busy) holdTimer = setTimeout(() => {
+    down = false;                                         // 长按成立：松手时不再翻页
+    post.classList.add('held');
+    const r = post.getBoundingClientRect(), b = book.getBoundingClientRect();
+    replyPop.dataset.id = post.dataset.id; replyPop.hidden = false;
+    const top = Math.max(8, Math.min(sy - b.top - 56, b.height - 60));
+    replyPop.style.top = top + 'px';
+    replyPop.style.left = Math.max(12, Math.min(sx - b.left - replyPop.offsetWidth / 2, b.width - replyPop.offsetWidth - 12)) + 'px';
+    if (navigator.vibrate) navigator.vibrate(10);
+  }, 480);
+});
+book.addEventListener('pointermove', e => { if (holdTimer && (Math.abs(e.clientX - sx) > 10 || Math.abs(e.clientY - sy) > 10)) { clearTimeout(holdTimer); holdTimer = null; } });
+book.addEventListener('pointercancel', () => { clearTimeout(holdTimer); holdTimer = null; });
+book.addEventListener('contextmenu', e => { if (e.target.closest('.post')) e.preventDefault(); });
+document.getElementById('replyGo').addEventListener('click', () => openReply(replyPop.dataset.id));
+// 工具栏「回复」：列出本页的几篇，选一篇来回
+document.getElementById('replyPage').addEventListener('click', () => {
+  bar.hidden = true;
+  if (!session || session.demo || !curEl) return;
+  const ids = [...new Set([...curEl.querySelectorAll('.post[data-id]')].map(d => d.dataset.id))];
+  if (!ids.length){ toast('这一页没有可以回复的内容'); return; }
+  replyPick.innerHTML = '<p>回复哪一篇</p>';
+  ids.forEach(id => { const p = postInfo(id); if (!p) return;
+    const b = document.createElement('button'); b.type = 'button';
+    b.textContent = nameOf(p.pk) + '：' + noEmoji(p.paras.join(' ')).slice(0, 40);
+    b.addEventListener('click', () => openReply(id)); replyPick.append(b); });
+  const c = document.createElement('button'); c.type = 'button'; c.textContent = '取消'; c.addEventListener('click', hideReplyUI);
+  replyPick.append(c); replyPick.hidden = false;
+});
 book.addEventListener('pointerup', e => {
+  clearTimeout(holdTimer); holdTimer = null;
   if (!down) return; down = false;
   const dx = e.clientX - sx, dy = e.clientY - sy;
   if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) { go(dx < 0 ? 1 : -1); return; }

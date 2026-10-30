@@ -17,6 +17,8 @@ const newPassInput = $('writerNewPass');
 const confirmPassInput = $('writerNewPassConfirm');
 const unlockPassInput = $('writerUnlockPass');
 let activePk = null;
+let replyCtx = null;      // 回复模式：被回复内容的 id / 作者 / kind；null 表示写随笔
+let draftKey = null;      // 随笔草稿按 npub 存；每条回复各自一份草稿
 let saveTimer = null;
 let opBusy = false;
 let draftGeneration = 0;
@@ -134,11 +136,20 @@ async function draftIO(pk,text){
 async function flushDraft(){
   clearTimeout(saveTimer);saveTimer=null;
   if (!activePk) return;
-  const pk=activePk, text=editor.value;
-  try{await draftIO(pk,text);if(pk===activePk)saveHint.textContent='已保存';return true;}
+  const pk=activePk, key=draftKey||pk, text=editor.value;
+  try{await draftIO(key,text);if(pk===activePk)saveHint.textContent='已保存';return true;}
   catch(e){if(pk===activePk){saveHint.textContent='保存失败';showStatus('本地存储不可用，请先复制文字备份',true);}return false;}
 }
+const HAN_MIN = 20;
+function updateReplyHint(){
+  const hint=$('writerHint');
+  if(!replyCtx){hint.hidden=true;return;}
+  const n=(editor.value.match(/\p{Script=Han}/gu)||[]).length;
+  hint.hidden=n>=HAN_MIN;
+  hint.textContent='不足二十个汉字的回复会正常发出，但不会收进书里';
+}
 function scheduleDraft(){
+  updateReplyHint();
   saveHint.textContent='保存中…';
   clearTimeout(saveTimer);
   saveTimer=setTimeout(flushDraft,600);
@@ -197,20 +208,26 @@ function setBusy(value){
 function updateKeyBadge(){
   importButton.textContent=getVault(activePk)?'私钥':'设置私钥';
 }
-async function openWriter(){
+async function openWriter(ctx=null){
   if(opBusy)return;
   const pk=currentReader();
   if(!pk){showStatus('只读示例不支持发表');return;}
+  replyCtx=ctx && /^[0-9a-f]{64}$/.test(ctx.id||'') && /^[0-9a-f]{64}$/.test(ctx.pk||'') ? ctx : null;
+  draftKey=replyCtx ? pk+'#reply:'+replyCtx.id : pk;
+  $('writerQuote').hidden=!replyCtx;
+  if(replyCtx){$('writerQuoteWho').textContent='回 '+(replyCtx.name||'')+'：';$('writerQuoteText').textContent='「'+(replyCtx.text||'')+'」';}
+  editor.placeholder=replyCtx?'写下你的回复……':'写点什么……';
   activePk=pk;draftGeneration++;
   editor.value='';showPanel(null);status.textContent='';
   updateKeyBadge();
   overlay.hidden=false;
   $('writerPublished').hidden=true;
-  $('writerTitle').textContent='随笔';
-  const generation=draftGeneration;
+  $('writerTitle').textContent=replyCtx?'回复':'随笔';
+  updateReplyHint();
+  const generation=draftGeneration, key=draftKey;
   try{
-    const draft=await draftIO(pk);
-    if(generation===draftGeneration && pk===activePk)editor.value=draft;
+    const draft=await draftIO(key);
+    if(generation===draftGeneration && pk===activePk){editor.value=draft;updateReplyHint();}
     if(generation===draftGeneration){saveHint.textContent='已保存';editor.focus();}
   }catch(e){showStatus('本地草稿不可用，请先确认浏览器存储权限',true);}
 }
@@ -221,7 +238,8 @@ function closeWriter(){
   overlay.hidden=true;
   showPanel(null);
   secretInput.value='';newPassInput.value='';confirmPassInput.value='';unlockPassInput.value='';
-  activePk=null;
+  activePk=null;replyCtx=null;draftKey=null;
+  $('writerQuote').hidden=true;$('writerHint').hidden=true;
   window.dispatchEvent(new Event('resize'));
 }
 async function importKey(){
@@ -276,7 +294,18 @@ async function signAndSend(){
     const lib=await schnorr();
     const actualPk=b2h(lib.getPublicKey(sk));
     if(actualPk!==pk)throw Error('密钥与当前阅读账号不匹配');
+    const ctx=replyCtx, key=draftKey||pk;
     const event={kind:1,created_at:Math.floor(Date.now()/1000),tags:[['client','驿书']],content,pubkey:pk};
+    if(ctx){
+      // 只回这一条，不接整串：普通客户端里就是对这条内容的直接回复
+      const hint=(ctx.relays||[]).map(safeRelay).find(Boolean)||'';
+      if(ctx.kind===1111 && Array.isArray(ctx.root) && ctx.root.length){
+        event.kind=1111;     // NIP-22：根作用域照抄，小写标签指向被回复的这条评论
+        event.tags=[...ctx.root.map(t=>t.map(String)),['e',ctx.id,hint,ctx.pk],['k','1111'],(hint?['p',ctx.pk,hint]:['p',ctx.pk]),['client','驿书']];
+      }else{
+        event.tags=[['e',ctx.id,hint,'root',ctx.pk],(hint?['p',ctx.pk,hint]:['p',ctx.pk]),['client','驿书']];   // NIP-10
+      }
+    }
     const canonical=JSON.stringify([0,event.pubkey,event.created_at,event.kind,event.tags,event.content]);
     event.id=b2h(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(canonical))));
     const digest=h2b(event.id);
@@ -285,7 +314,7 @@ async function signAndSend(){
       throw Error('本地签名校验失败，未发送');
     sk.fill(0);sk=null;
     showPanel(null);showStatus('正在发表…');
-    const urls=writeRelays(pk);
+    const urls=[...new Set([...writeRelays(pk),...((ctx?.relays)||[]).map(safeRelay).filter(Boolean)])].slice(0,9);
     if(!urls.length)throw Error('没有可用的写入 Relay');
     const result=await Promise.all(urls.map(url=>sendRelay(url,event)));
     if(pk!==activePk)return;
@@ -293,14 +322,15 @@ async function signAndSend(){
     if(!ok)throw Error('未收到 Relay 接受确认；草稿保留。若网络不稳定，请先检查是否已发布，避免重复发帖');
     // The event has been accepted; display it immediately without waiting for relay echo.
     window.dispatchEvent(new CustomEvent('nostr-book:published', {detail:event}));
-    await draftIO(pk,'');
+    await draftIO(key,'');
     editor.value='';saveHint.textContent='草稿已清空';
     showStatus('发表成功 · '+ok+' 个 Relay 已接收');
     $('writerPublished').hidden=false;
   }catch(e){if(pk===activePk)showStatus(e.message||'发表失败，草稿已保留',true);}
   finally{sk?.fill(0);setBusy(false);}
 }
-$('writePost').addEventListener('click',openWriter);
+$('writePost').addEventListener('click',()=>openWriter());
+window.addEventListener('nostr-book:reply',e=>openWriter(e.detail));
 closeButton.addEventListener('click',closeWriter);
 editor.addEventListener('input',scheduleDraft);
 importButton.addEventListener('click',()=>{showPanel('setup');showStatus('');secretInput.focus();});

@@ -296,7 +296,10 @@ const chunk = (a, n) => { const r = []; for (let i = 0; i < a.length; i += n) r.
 /* ---------- 昵称 ---------- */
 const names = LS.get('book.names', {});
 const nameUpdated = LS.get('book.names.updated', {});
-const nameOf = pk => names[pk] || ('无名氏·' + pk.slice(0, 4));
+// 隐藏 emoji：图形符号连同肤色、变体选择符、零宽连接符、旗帜、键帽一起去掉（保留 ©®™）
+const EMOJI = /(?![©®™])\p{Extended_Pictographic}|[\u{1F3FB}-\u{1F3FF}\u{1F1E6}-\u{1F1FF}\u{E0020}-\u{E007F}\uFE0F\u20E3\u200D]/gu;
+const noEmoji = s => String(s).replace(EMOJI, '').replace(/[ \t　]{2,}/g, ' ');
+const nameOf = pk => noEmoji(names[pk] || '').trim() || ('无名氏·' + pk.slice(0, 4));
 // 资料（kind 0）分散在各中继，额外问两个专门收录资料的中继
 const PROFILE_RELAYS = [...new Set([...RELAYS, 'wss://purplepag.es', 'wss://user.kindpag.es'])];
 const nameTries = {};
@@ -331,7 +334,7 @@ function clean(ev){
   const img = comment ? null : pickImage(ev, tags);
   const s = String(ev.content || '')
     .replace(/(?:nostr:)?(?:npub|nprofile|note|nevent|naddr)1[02-9ac-hj-np-z]+/gi, '')
-    .replace(/https?:\/\/\S+/gi, '').replace(/\bwww\.\S+/gi, '')
+    .replace(/https?:\/\/\S+/gi, '').replace(/\bwww\.\S+/gi, '').replace(EMOJI, '')
     .replace(/[ \t　]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{2,}/g, '\n').trim();
   // Only count the commenter's own Han characters, not quoted parent content.
   const ownText = s.split('\n').filter(line => !/^[>＞]/.test(line.trim())).join('');
@@ -362,6 +365,7 @@ const MB = M.querySelector('.body');
 const overflows = () => MB.scrollHeight > MB.clientHeight + 1;
 
 function postEl(paras, pk, {dc = false, cont = false, by = true, comment = false, ill = null} = {}){
+  paras = paras.map(x => noEmoji(x).trim()).filter(Boolean);       // 本地存档里的旧文字也去掉 emoji
   const d = document.createElement('div'); d.className = 'post' + (cont ? ' cont' : '') + (comment ? ' comment' : '');
   if (ill) d.append(illEl(ill, paras.join('').length > 90));
   paras.forEach((tx, i) => {

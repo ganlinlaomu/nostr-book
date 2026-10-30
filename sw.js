@@ -1,8 +1,10 @@
-const CACHE = 'book-v23';
+const CACHE = 'book-v24';
+// 字体单独一个长期缓存：发新版时不清掉，免得每次更新都退回系统宋体、重新下载
+const FONT_CACHE = 'book-fonts-v1';
 const SHELL = ['./', 'index.html', 'writer.js', 'vendor/noble-secp256k1.js', 'manifest.json', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))));
+  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE && k !== FONT_CACHE).map(k => caches.delete(k)))));
   self.clients.claim();
 });
 self.addEventListener('fetch', e => {
@@ -10,8 +12,8 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   // 字体：先用缓存
   if (u.host.endsWith('fonts.gstatic.com') || u.host.endsWith('fonts.googleapis.com')) {
-    e.respondWith(caches.open(CACHE).then(async c => (await c.match(e.request)) ||
-      fetch(e.request).then(r => { c.put(e.request, r.clone()); return r; })));
+    e.respondWith(caches.open(FONT_CACHE).then(async c => (await c.match(e.request)) ||
+      fetch(e.request).then(r => { if (r.ok || r.type === 'opaque') c.put(e.request, r.clone()); return r; })));
     return;
   }
   // 页面：先联网，断网时用缓存

@@ -324,7 +324,8 @@ async function ensureNames(pks){
 
 /* ---------- 正文清理：只留文字 ---------- */
 const CONTENT_KINDS = [1, 1111];
-const MIN_COMMENT_HAN = 20;
+const MIN_HAN = 20;                       // 动态和评论都要有至少 20 个自己写的汉字
+const hanCount = lines => lines.filter(line => !/^[>＞]/.test(String(line).trim())).join('').match(/\p{Script=Han}/gu)?.length || 0;
 function clean(ev){
   if (!CONTENT_KINDS.includes(ev.kind)) return null;
   const tags = Array.isArray(ev.tags) ? ev.tags : [];
@@ -337,8 +338,7 @@ function clean(ev){
     .replace(/https?:\/\/\S+/gi, '').replace(/\bwww\.\S+/gi, '').replace(EMOJI, '')
     .replace(/[ \t　]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{2,}/g, '\n').trim();
   // Only count the commenter's own Han characters, not quoted parent content.
-  const ownText = s.split('\n').filter(line => !/^[>＞]/.test(line.trim())).join('');
-  if (comment && (ownText.match(/\p{Script=Han}/gu) || []).length < MIN_COMMENT_HAN) return null;
+  if (hanCount(s.split('\n')) < MIN_HAN) return null;
   if (s.replace(/[\s\p{P}\p{S}]/gu, '').length < 4) return null;
   return { id: ev.id, pk: ev.pubkey, t: ev.created_at,
     paras:s.split('\n').map(x=>x.trim()).filter(Boolean), comment, ...(img ? { img } : {}) };
@@ -954,7 +954,10 @@ function restore(pk){
   selfBackfillNeeded = !LS.get('book.selfBackfilled.v1.'+pk,false);
   follows = c.follows || []; cursor = c.cursor; exhausted = !!c.exhausted; held = c.held || [];
   c.posts.concat(held).forEach(p => seen.add(p.id));
-  days = groupDays(c.posts.slice());
+  const keep = p => hanCount(p.paras || []) >= MIN_HAN;           // 存档里的旧短帖也滤掉
+  held = held.filter(keep);
+  days = groupDays(c.posts.filter(keep));
+  if (!days.length) return false;
   days.forEach(paginateDay);
   if (exhausted) pages.push({ type:'end' });
   readerName = nameOf(pk); coverState = 'ready';
@@ -1034,7 +1037,7 @@ function buildDemo(){
 /* ---------- 启动 ---------- */
 window.bookWriterReader = () => session && !session.demo ? session.pk : null;
 // Only accept the writer's successfully published event for the current identity.
-// All NIP-10 / NIP-22 comments still pass the shared 20-Han clean() filter.
+// All notes and NIP-10 / NIP-22 comments pass the shared 20-Han clean() filter.
 window.addEventListener('nostr-book:published', e => {
   const event = e.detail;
   if (!session || session.demo || !event || event.pubkey !== session.pk) return;

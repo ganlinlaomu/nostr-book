@@ -41,6 +41,17 @@ body{height:100%;margin:0;background:var(--paper);color:var(--ink);font-family:v
 .page::before{content:"";position:absolute;top:0;bottom:0;left:0;width:16px;pointer-events:none;
   background:linear-gradient(to right,var(--spine),transparent)}
 .measure{visibility:hidden;pointer-events:none;z-index:-5}
+/* 横屏双页：两张半宽的纸并排，中缝是书脊。每页排版宽度和手机单页相近 */
+.sheet{position:absolute;inset:0;perspective:2600px}
+.spread .page.l{right:50%;padding-left:max(30px, env(safe-area-inset-left, 0px));padding-right:34px;transform-origin:right center}
+.spread .page.r{left:50%;padding-left:34px;padding-right:max(30px, env(safe-area-inset-right, 0px))}
+.spread .page.l::before{left:auto;right:0;width:22px;background:linear-gradient(to left,var(--spine),transparent)}
+.spread .page.r::before{width:22px}
+.spread .page.blank{background:var(--paper)}
+.spread .page.hide{visibility:hidden}
+.turn-in-l{z-index:4;animation:in-l .58s cubic-bezier(.35,.05,.25,1) forwards}
+.turn-in-l>.sheen{animation:fadeout .58s forwards}
+@keyframes in-l{from{transform:rotateY(104deg)}to{transform:none}}
 .head{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);letter-spacing:.25em;
   border-bottom:.5px solid var(--rule);padding-bottom:7px}
 .body{position:relative;flex:1;min-height:0;overflow:hidden;padding-top:20px;display:flex;flex-direction:column;gap:14px}
@@ -399,6 +410,22 @@ M.className = 'page measure';
 M.innerHTML = '<div class="head"><span>' + spaced(BOOK) + '</span><span>十月廿九日</span></div><div class="body"></div><div class="foot">一</div>';
 book.appendChild(M);
 const MB = M.querySelector('.body');
+// iPad 横屏（或宽屏电脑）摊开成左右两页；量版用的那页同样是半宽
+const SPREAD_MQ = matchMedia('(orientation: landscape) and (min-width: 900px)');
+let spread = false;
+function setSpread(){ spread = SPREAD_MQ.matches; book.classList.toggle('spread', spread); M.classList.toggle('r', spread); }
+setSpread();
+// 配对：封面和每章扉页都放右页，需要时左边留白
+function spreadsOf(){
+  const out = [[null, 0]]; let left = null;
+  for (let i = 1; i < pages.length; i++){
+    if (left === null){ if (pages[i].type === 'chap') out.push([null, i]); else left = i; }
+    else { out.push([left, i]); left = null; }
+  }
+  if (left !== null) out.push([left, null]);
+  return out;
+}
+const spreadAt = (S, i) => Math.max(0, S.findIndex(s => s[0] === i || s[1] === i));
 const overflows = () => MB.scrollHeight > MB.clientHeight + 1;
 
 function postEl(paras, pk, {dc = false, cont = false, by = true, comment = false, ill = null, post = null} = {}){
@@ -846,6 +873,16 @@ book.addEventListener('error', e => {
   if (t.dataset.raw && t.src !== t.dataset.raw){ t.src = t.dataset.raw; return; }
   t.closest('.ill').classList.add('gone');
 }, true);
+function renderSpread(s){
+  const w = document.createElement('div'); w.className = 'sheet';
+  s.forEach((i, k) => {
+    let el;
+    if (i == null){ el = document.createElement('div'); el.className = 'page blank'; }
+    else el = render(i);
+    el.classList.add(k ? 'r' : 'l'); w.append(el);
+  });
+  return w;
+}
 function bindCover(el){
   const f = el.querySelector('#login');
   if (f) f.addEventListener('submit', e => { e.preventDefault();
@@ -868,23 +905,60 @@ const bar = document.getElementById('bar'), toastEl = document.getElementById('t
 function mount(el){ book.insertBefore(el, bar); }
 function after(){
   if (pages[idx].type === 'cover') bindCover(curEl);
-  document.getElementById('where').textContent = idx === 0 ? '封面' : '第 ' + cn(idx) + ' 页';
+  document.getElementById('where').textContent = whereLabel();
   updateDot();
   if (applyPending && fresh.length) setTimeout(applyFresh, 0);
-  if (session && idx > 0 && idx >= pages.length - 4) loadMore().then(() => { if (pages[idx]) document.getElementById('where').textContent = idx === 0 ? '封面' : '第 ' + cn(idx) + ' 页'; });
+  if (session && idx > 0 && idx >= pages.length - 4) loadMore().then(() => { if (pages[idx]) document.getElementById('where').textContent = whereLabel(); });
+}
+function whereLabel(){
+  if (idx === 0) return '封面';
+  if (spread){ const s = spreadsOf()[spreadAt(spreadsOf(), idx)]; if (s && s[0] != null && s[1] != null) return '第 ' + cn(s[0]) + '–' + cn(s[1]) + ' 页'; }
+  return '第 ' + cn(idx) + ' 页';
 }
 // 直接换页：先打断进行中的翻页动画，清掉书里所有旧页，免得有一张旧页（比如封面）压在上面
 let turnNo = 0;
 function show(i){
   turnNo++; busy = false;
   document.getElementById('replyPop').hidden = true; document.getElementById('replyPick').hidden = true;
-  book.querySelectorAll('.page:not(.measure)').forEach(e => e.remove());
+  book.querySelectorAll('.sheet, .page:not(.measure)').forEach(e => e.remove());
+  if (spread){
+    const S = spreadsOf(), sp = S[spreadAt(S, i)];
+    idx = sp[0] ?? sp[1]; curEl = renderSpread(sp); mount(curEl); after(); return;
+  }
   idx = i; curEl = render(i); mount(curEl); after();
 }
 let toastT;
 function toast(m){ toastEl.textContent = m; toastEl.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => toastEl.hidden = true, 1800); }
+function goSpread(dir){
+  const S = spreadsOf(), sj = spreadAt(S, idx) + dir;
+  if (sj < 0) return;
+  if (sj >= S.length){
+    if (!session) return;
+    if (!exhausted){ toast('正在取更早的篇章……'); loadMore(); }
+    return;
+  }
+  busy = true; bar.hidden = true;
+  const sp = S[sj], j = sp[0] ?? sp[1], next = renderSpread(sp), old = curEl;
+  const my = ++turnNo, timers = [];
+  const done = () => { if (my !== turnNo) return; timers.forEach(clearTimeout); old.remove();
+    next.querySelectorAll('.page').forEach(p => p.classList.remove('under', 'turn-in-l', 'hide', 'fade-in'));
+    curEl = next; idx = j; busy = false; after(); };
+  const [oL, oR] = old.children, [nL, nR] = next.children;
+  if (reduce){ next.querySelectorAll('.page').forEach(p => p.classList.add('fade-in')); mount(next); timers.push(setTimeout(done, 260)); return; }
+  if (dir > 0){
+    // 右页绕书脊翻过去；翻过一半时旧左页换成新左页
+    book.insertBefore(next, old); nR.classList.add('under'); oR.classList.add('turn-out');
+    timers.push(setTimeout(() => oL.classList.add('hide'), 300));
+  } else {
+    // 新左页从书脊翻回来；翻过一半时右页换成新的
+    mount(next); nL.classList.add('turn-in-l'); nR.classList.add('hide'); oL.classList.add('under-back');
+    timers.push(setTimeout(() => nR.classList.remove('hide'), 300));
+  }
+  timers.push(setTimeout(done, 600));
+}
 function go(dir){
   if (busy) return;
+  if (spread) return goSpread(dir);
   const j = idx + dir;
   if (j < 0) return;
   if (j >= pages.length){
@@ -966,8 +1040,9 @@ book.addEventListener('pointerup', e => {
   if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) { go(dx < 0 ? 1 : -1); return; }
   if (Math.abs(dx) < 10 && Math.abs(dy) < 10){
     const w = book.clientWidth, x = e.clientX - book.getBoundingClientRect().left;
-    if (x > w * 0.68) go(1);
-    else if (x < w * 0.32) go(-1);
+    const edge = spread ? 0.42 : 0.32;                       // 双页时中缝两侧留给工具栏
+    if (x > w * (1 - edge)) go(1);
+    else if (x < w * edge) go(-1);
     else if (session) bar.hidden = !bar.hidden;
   }
 });
@@ -1083,8 +1158,9 @@ async function refreshFollows(pk){
 /* 屏幕尺寸或字体变化时重新排版，停在原来那一页 */
 function repaginate(){
   if (!document.getElementById('writerOverlay').hidden) return;
-  if (!days.length) return;
   if (busy){ later(); return; }                                  // 翻页动画中重排会留下一张旧页，等动画结束
+  const was = spread; setSpread();
+  if (!days.length){ if (was !== spread && curEl) show(idx); return; }   // 封面等没有正文时，转屏也要换成单/双页
   const a = pages[idx] && pages[idx].anchor, ty = pages[idx] && pages[idx].type;
   pages = [{ type:'cover' }]; chapterNo = 0; illAt = -99;
   days.forEach(paginateDay);
@@ -1095,6 +1171,7 @@ function repaginate(){
 }
 let rt; const later = () => { clearTimeout(rt); rt = setTimeout(repaginate, 250); };
 addEventListener('resize', later);
+SPREAD_MQ.addEventListener && SPREAD_MQ.addEventListener('change', later);
 if (document.fonts) document.fonts.addEventListener('loadingdone', later);
 
 /* ---------- 示例数据 ---------- */

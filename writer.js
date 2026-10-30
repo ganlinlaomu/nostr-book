@@ -26,6 +26,7 @@ const encoder = new TextEncoder();
 const KDF_ITERATIONS = 310000;
 const MAX_CONTENT = 12000;
 const NOBLE_SOURCE = './vendor/noble-secp256k1.js';
+const SESSION_MS = 15 * 60000;   // 解锁一次后 15 分钟内（或切到后台前）免验证
 let schnorrPromise;
 function showStatus(text, error = false){
   status.textContent = text;
@@ -202,11 +203,12 @@ function currentReader(){
 }
 function setBusy(value){
   opBusy=value;
-  for(const b of [publishButton,importButton,$('writerSaveKey'),$('writerSend'),closeButton])
+  for(const b of [publishButton,importButton,$('writerSaveKey'),$('writerSend'),closeButton,$('writerFaceId'),$('writerFaceIdOff')])
     b.disabled=value;
 }
 function updateKeyBadge(){
   importButton.textContent=getVault(activePk)?'私钥':'设置私钥';
+  updateFaceIdButton();
 }
 async function openWriter(ctx=null){
   if(opBusy)return;
@@ -239,8 +241,110 @@ function closeWriter(){
   showPanel(null);
   secretInput.value='';newPassInput.value='';confirmPassInput.value='';unlockPassInput.value='';
   activePk=null;replyCtx=null;draftKey=null;
+  if(faceSetup){faceSetup.sk.fill(0);faceSetup=null;}
+  updateFaceIdButton();
   $('writerQuote').hidden=true;$('writerHint').hidden=true;
   window.dispatchEvent(new Event('resize'));
+}
+/* ---------- 解锁会话：私钥只在内存里放一小会儿 ---------- */
+let unlocked = null, unlockTimer = null, faceSetup = null;
+function sessionSk(pk){
+  if(unlocked && unlocked.pk===pk && Date.now()<unlocked.until) return unlocked.sk;
+  if(unlocked) lockSession();
+  return null;
+}
+function startSession(pk,sk){
+  lockSession();
+  unlocked={pk,sk:sk.slice(),until:Date.now()+SESSION_MS};
+  unlockTimer=setTimeout(lockSession,SESSION_MS);
+  updateFaceIdButton();
+}
+function lockSession(){
+  clearTimeout(unlockTimer);unlockTimer=null;
+  if(unlocked){unlocked.sk.fill(0);unlocked=null;}
+  updateFaceIdButton();
+}
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden' && !opBusy) lockSession(); });
+window.addEventListener('pagehide',lockSession);
+
+/* ---------- Face ID：通行密钥的 PRF 输出派生 AES 密钥，包住私钥 ----------
+ * 私钥仍只以密文落盘；没有本人生物识别就拿不到 PRF 输出，也就解不开。需要 iOS 18+ / 支持 PRF 的浏览器。 */
+const hexb = h => Uint8Array.from(h.match(/../g), x => parseInt(x, 16));
+function faceKey(pk){return 'book.writer.passkey.v1.' + pk;}
+function getFaceWrap(pk){
+  try{
+    const o=JSON.parse(localStorage.getItem(faceKey(pk)));
+    if(o?.v===1 && o.pk===pk && /^[a-f0-9]+$/.test(o.cred) && /^[a-f0-9]{64}$/.test(o.salt) &&
+       /^[a-f0-9]{24}$/.test(o.iv) && /^[a-f0-9]+$/.test(o.data)) return o;
+  }catch(e){}
+  return null;
+}
+const faceCapable = () => !!(window.PublicKeyCredential && navigator.credentials && window.isSecureContext);
+async function prfAes(out,pk){
+  const base=await crypto.subtle.importKey('raw',out,'HKDF',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'HKDF',hash:'SHA-256',salt:encoder.encode('nostr-book:passkey:v1'),info:encoder.encode(pk)},
+    base,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+async function prfGet(credId,salt){
+  const cred=await navigator.credentials.get({publicKey:{challenge:crypto.getRandomValues(new Uint8Array(32)),rpId:location.hostname,
+    allowCredentials:[{type:'public-key',id:credId}],userVerification:'required',timeout:60000,extensions:{prf:{eval:{first:salt}}}}});
+  const first=cred?.getClientExtensionResults?.().prf?.results?.first;
+  if(!first) throw Error('这台设备暂不支持 Face ID 解锁');
+  return new Uint8Array(first);
+}
+async function faceUnlock(pk){
+  const w=getFaceWrap(pk); if(!w) return null;
+  const out=await prfGet(hexb(w.cred),hexb(w.salt));
+  const key=await prfAes(out,pk); out.fill(0);
+  try{
+    return new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:hexb(w.iv),additionalData:encoder.encode('nostr-book:passkey:'+pk)},key,hexb(w.data)));
+  }catch(e){ throw Error('Face ID 解锁数据损坏，请改用密码'); }
+}
+async function saveFaceWrap(pk,credId,salt,out,sk){
+  const key=await prfAes(out,pk); out.fill(0);
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const data=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:encoder.encode('nostr-book:passkey:'+pk)},key,sk));
+  localStorage.setItem(faceKey(pk),JSON.stringify({v:1,pk,cred:b2h(credId),salt:b2h(salt),iv:b2h(iv),data:b2h(data)}));
+}
+function updateFaceIdButton(){
+  const b=$('writerFaceId'), off=$('writerFaceIdOff');
+  const pk=activePk, has=!!(pk && getFaceWrap(pk));
+  b.hidden=!(pk && faceCapable() && !has && (faceSetup?.pk===pk || (unlocked && unlocked.pk===pk && Date.now()<unlocked.until)));
+  b.textContent=faceSetup?.pk===pk?'完成 Face ID 设置':'启用 Face ID';
+  off.hidden=!has;
+}
+async function enableFaceId(){
+  if(opBusy||!activePk)return;
+  const pk=activePk;
+  // 第二步：有的系统建好通行密钥时还不给 PRF，需要再验证一次
+  if(faceSetup?.pk===pk){
+    const st=faceSetup;
+    try{ const out=await prfGet(st.credId,st.salt); await saveFaceWrap(pk,st.credId,st.salt,out,st.sk); showStatus('已启用 Face ID 解锁'); }
+    catch(e){ showStatus(e.name==='NotAllowedError'?'已取消':(e.message||'Face ID 设置失败'),true); return; }
+    finally{ st.sk.fill(0); faceSetup=null; updateFaceIdButton(); }
+    return;
+  }
+  const sk=sessionSk(pk); if(!sk){showStatus('请先用密码解锁一次',true);return;}
+  const copy=sk.slice(), salt=crypto.getRandomValues(new Uint8Array(32));
+  let keep=false;
+  try{
+    const cred=await navigator.credentials.create({publicKey:{rp:{name:'驿书',id:location.hostname},
+      user:{id:crypto.getRandomValues(new Uint8Array(16)),name:'驿书 '+pk.slice(0,8),displayName:'驿书 '+pk.slice(0,8)},
+      challenge:crypto.getRandomValues(new Uint8Array(32)),pubKeyCredParams:[{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
+      authenticatorSelection:{residentKey:'preferred',userVerification:'required'},timeout:60000,extensions:{prf:{eval:{first:salt}}}}});
+    const prf=cred?.getClientExtensionResults?.().prf;
+    if(!prf || (!prf.enabled && !prf.results)) throw Error('这台设备暂不支持 Face ID 解锁（需要 iOS 18 或更新）');
+    const credId=new Uint8Array(cred.rawId);
+    if(prf.results?.first){ await saveFaceWrap(pk,credId,salt,new Uint8Array(prf.results.first),copy); showStatus('已启用 Face ID 解锁'); }
+    else { faceSetup={pk,credId,salt,sk:copy}; keep=true; showStatus('再验证一次 Face ID 即可完成设置'); }
+  }catch(e){ showStatus(e.name==='NotAllowedError'?'已取消':(e.message||'Face ID 设置失败'),true); }
+  finally{ if(!keep) copy.fill(0); updateFaceIdButton(); }
+}
+function disableFaceId(){
+  if(!activePk)return;
+  localStorage.removeItem(faceKey(activePk));
+  showStatus('已关闭 Face ID 解锁；通行密钥可在 设置 › 密码 里删除');
+  updateFaceIdButton();
 }
 async function importKey(){
   if(opBusy)return;
@@ -259,7 +363,8 @@ async function importKey(){
     const vault=await encryptSecret(sk,password,pk);
     localStorage.setItem(vaultKey(pk),JSON.stringify(vault));
     showPanel(null);updateKeyBadge();
-    showStatus('私钥已加密保存');
+    startSession(pk,sk);
+    showStatus(faceCapable()?'私钥已加密保存 · 可点「启用 Face ID」以后免输密码':'私钥已加密保存');
   }catch(e){showStatus(e.message||'私钥设置失败',true);}
   finally{
     sk?.fill(0);
@@ -272,15 +377,31 @@ async function publish(){
   const content=editor.value.trim();
   if(!content){showStatus('请先写点什么',true);editor.focus();return;}
   if(content.length>MAX_CONTENT){showStatus('正文过长，请保持在 12000 字符以内',true);return;}
-  if(!await flushDraft())return;
-  if(!getVault(activePk)){showPanel('setup');showStatus('');secretInput.focus();return;}
-  if(!navigator.onLine){showStatus('当前离线，草稿已保存；联网后可发表',true);return;}
+  const pk=activePk;
+  if(!getVault(pk)){await flushDraft();showPanel('setup');showStatus('');secretInput.focus();return;}
+  if(!navigator.onLine){await flushDraft();showStatus('当前离线，草稿已保存；联网后可发表',true);return;}
+  if(sessionSk(pk)) return signAndSend();
+  if(getFaceWrap(pk) && faceCapable()){
+    // 直接在点按里调起 Face ID（之前不能有耗时的 await，否则 Safari 会拒绝）
+    let sk;
+    try{ sk=await faceUnlock(pk); }
+    catch(e){
+      showPanel('unlock');unlockPassInput.focus();
+      showStatus(e.name==='NotAllowedError'?'Face ID 已取消，可用密码解锁':(e.message||'Face ID 未完成，可用密码解锁'),true);
+      return;
+    }
+    if(pk!==activePk){sk.fill(0);return;}
+    startSession(pk,sk);sk.fill(0);
+    return signAndSend();
+  }
+  await flushDraft();
   showPanel('unlock');showStatus('');unlockPassInput.focus();
 }
 async function signAndSend(){
   if(opBusy||!activePk)return;
   const pk=activePk, content=editor.value.trim(),password=unlockPassInput.value;
-  if(!password){showStatus('请输入本地解锁密码',true);return;}
+  const cached=sessionSk(pk);
+  if(!cached && !password){showStatus('请输入本地解锁密码',true);return;}
   if(!content){showStatus('正文为空',true);return;}
   if(content.length>MAX_CONTENT){showStatus('正文过长',true);return;}
   let sk;
@@ -288,12 +409,16 @@ async function signAndSend(){
   unlockPassInput.value='';
   try{
     if(!await flushDraft())throw Error('草稿未能保存，请检查本机存储空间');
-    const vault=getVault(pk);
-    if(!vault)throw Error('签名密钥未设置');
-    sk=await decryptSecret(vault,password);
+    if(cached) sk=cached.slice();
+    else{
+      const vault=getVault(pk);
+      if(!vault)throw Error('签名密钥未设置');
+      sk=await decryptSecret(vault,password);
+    }
     const lib=await schnorr();
     const actualPk=b2h(lib.getPublicKey(sk));
     if(actualPk!==pk)throw Error('密钥与当前阅读账号不匹配');
+    if(!cached) startSession(pk,sk);
     const ctx=replyCtx, key=draftKey||pk;
     const event={kind:1,created_at:Math.floor(Date.now()/1000),tags:[['client','驿书']],content,pubkey:pk};
     if(ctx){
@@ -324,7 +449,7 @@ async function signAndSend(){
     window.dispatchEvent(new CustomEvent('nostr-book:published', {detail:event}));
     await draftIO(key,'');
     editor.value='';saveHint.textContent='草稿已清空';
-    showStatus('发表成功 · '+ok+' 个 Relay 已接收');
+    showStatus('发表成功 · '+ok+' 个 Relay 已接收 · 15 分钟内免验证');
     $('writerPublished').hidden=false;
   }catch(e){if(pk===activePk)showStatus(e.message||'发表失败，草稿已保留',true);}
   finally{sk?.fill(0);setBusy(false);}
@@ -335,6 +460,8 @@ closeButton.addEventListener('click',closeWriter);
 editor.addEventListener('input',scheduleDraft);
 importButton.addEventListener('click',()=>{showPanel('setup');showStatus('');secretInput.focus();});
 $('writerSaveKey').addEventListener('click',importKey);
+$('writerFaceId').addEventListener('click',enableFaceId);
+$('writerFaceIdOff').addEventListener('click',disableFaceId);
 publishButton.addEventListener('click',publish);
 $('writerSend').addEventListener('click',signAndSend);
 $('writerPublished').addEventListener('click',()=>{ $('writerPublished').hidden=true;closeWriter(); });

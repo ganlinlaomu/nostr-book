@@ -50,9 +50,24 @@ body{height:100%;margin:0;background:var(--paper);color:var(--ink);font-family:v
 .post.comment:not(.cont)::before{content:"评论";display:block;font-size:11px;letter-spacing:.18em;color:var(--accent);margin-bottom:4px}
 .post.comment.cont::before{content:"续评";display:block;font-size:10px;letter-spacing:.15em;color:var(--muted);margin-bottom:4px}
 .post p.q{text-indent:0;margin-left:1em;padding-left:.8em;border-left:2px solid var(--rule);color:var(--muted)}
-.post.cont p:first-child,.post.has-dc p:first-child{text-indent:0}
+.post.cont p:first-of-type,.post.has-dc p:first-of-type{text-indent:0}
 .dc{float:left;font-size:3.05em;line-height:1;margin:.1em .14em 0 0;color:var(--accent);font-weight:600}
 .by{text-align:right;font-size:13px;color:var(--accent);margin-top:6px;letter-spacing:.1em;clear:both}
+/* 插画：照片转成墨色印在纸上，边缘像墨洇开，几页才出现一张 */
+.ill{margin:0;position:relative}
+.ill.wide{width:94%;aspect-ratio:3/2;margin:2px auto 12px}
+.ill.wrap{float:right;width:47%;aspect-ratio:4/5;margin:.35em -4px .3em .7em;
+  shape-outside:ellipse(47% 49% at 50% 50%);shape-margin:4px}
+.ill img{display:block;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .7s ease;
+  filter:grayscale(1) sepia(.5) contrast(1.18) brightness(1.06);mix-blend-mode:multiply;
+  -webkit-mask-size:100% 100%;mask-size:100% 100%;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat}
+.ill img.ok{opacity:.92}
+.ill.gone{display:none}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .ill img{
+  filter:grayscale(1) sepia(.4) contrast(1.05) brightness(.72);mix-blend-mode:normal}
+  :root:not([data-theme="light"]) .ill img.ok{opacity:.85}}
+:root[data-theme="dark"] .ill img{filter:grayscale(1) sepia(.4) contrast(1.05) brightness(.72);mix-blend-mode:normal}
+:root[data-theme="dark"] .ill img.ok{opacity:.85}
 .orn{text-align:center;color:var(--rule);font-size:11px;letter-spacing:.6em;margin:0;line-height:1}
 /* cover */
 .cover{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:34px;text-align:center}
@@ -307,6 +322,7 @@ function clean(ev){
   if (tags.some(t => t[0] === 'content-warning')) return null;
   // NIP-10 replies and NIP-22 (kind 1111) comments.
   const comment = ev.kind === 1111 || tags.some(t => t[0] === 'e' && t[3] !== 'mention');
+  const img = comment ? null : pickImage(ev, tags);
   const s = String(ev.content || '')
     .replace(/(?:nostr:)?(?:npub|nprofile|note|nevent|naddr)1[02-9ac-hj-np-z]+/gi, '')
     .replace(/https?:\/\/\S+/gi, '').replace(/\bwww\.\S+/gi, '')
@@ -316,7 +332,18 @@ function clean(ev){
   if (comment && (ownText.match(/\p{Script=Han}/gu) || []).length < MIN_COMMENT_HAN) return null;
   if (s.replace(/[\s\p{P}\p{S}]/gu, '').length < 4) return null;
   return { id: ev.id, pk: ev.pubkey, t: ev.created_at,
-    paras:s.split('\n').map(x=>x.trim()).filter(Boolean), comment };
+    paras:s.split('\n').map(x=>x.trim()).filter(Boolean), comment, ...(img ? { img } : {}) };
+}
+// 动态里的第一张静态图（不要 gif）：先看 imeta 标签，再看正文里的链接
+const IMG_URL = /https?:\/\/[^\s<>"']+?\.(?:jpe?g|png|webp|avif)(?:\?[^\s<>"']*)?(?=$|[\s<>"'])/i;
+function pickImage(ev, tags){
+  for (const t of tags){
+    if (t[0] !== 'imeta') continue;
+    const f = {}; t.slice(1).forEach(x => { const i = String(x).indexOf(' '); if (i > 0) f[x.slice(0, i)] = x.slice(i + 1); });
+    if (f.url && /^https:\/\//.test(f.url) && (/^image\/(?!gif)/.test(f.m || '') || IMG_URL.test(f.url))) return f.url;
+  }
+  const m = String(ev.content || '').match(IMG_URL);
+  return m && /^https:/.test(m[0]) ? m[0] : null;
 }
 
 /* ---------- 排版 ---------- */
@@ -328,8 +355,9 @@ book.appendChild(M);
 const MB = M.querySelector('.body');
 const overflows = () => MB.scrollHeight > MB.clientHeight + 1;
 
-function postEl(paras, pk, {dc = false, cont = false, by = true, comment = false} = {}){
+function postEl(paras, pk, {dc = false, cont = false, by = true, comment = false, ill = null} = {}){
   const d = document.createElement('div'); d.className = 'post' + (cont ? ' cont' : '') + (comment ? ' comment' : '');
+  if (ill) d.append(illEl(ill, paras.join('').length > 90));
   paras.forEach((tx, i) => {
     const p = document.createElement('p');
     if (i === 0 && dc && /^[㐀-鿿]/.test(tx)){
@@ -343,16 +371,31 @@ function postEl(paras, pk, {dc = false, cont = false, by = true, comment = false
   if (by){ const b = document.createElement('div'); b.className = 'by'; b.dataset.pk = pk; b.textContent = '—— ' + nameOf(pk); d.append(b); }
   return d;
 }
+// 不规则的墨洇边：模糊的圆角块再用噪声扭一扭，每张图换一个 seed
+const inkMask = seed => 'url("data:image/svg+xml,' + encodeURIComponent(
+  "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'>" +
+  "<filter id='f' x='-30%' y='-30%' width='160%' height='160%'><feTurbulence type='fractalNoise' baseFrequency='.05' numOctaves='3' seed='" + seed + "'/>" +
+  "<feDisplacementMap in='SourceGraphic' scale='16' xChannelSelector='R' yChannelSelector='G'/><feGaussianBlur stdDeviation='2.4'/></filter>" +
+  "<rect x='11' y='11' width='78' height='78' rx='20' fill='white' filter='url(#f)'/></svg>") + '")';
+const imgProxy = u => 'https://wsrv.nl/?url=' + encodeURIComponent(u) + '&w=900&q=72&output=webp';
+function illEl(url, wrap){
+  const f = document.createElement('figure'); f.className = 'ill ' + (wrap ? 'wrap' : 'wide');
+  const im = document.createElement('img'); im.alt = ''; im.decoding = 'async'; im.referrerPolicy = 'no-referrer';
+  im.dataset.src = imgProxy(url); im.dataset.raw = url;           // 真正翻到这页才加载
+  let h = 0; for (const c of url) h = (h * 31 + c.charCodeAt(0)) % 997;
+  const m = inkMask(h % 9 + 1); im.style.webkitMaskImage = m; im.style.maskImage = m;
+  f.append(im); return f;
+}
 function ornEl(){ const o = document.createElement('p'); o.className = 'orn'; o.textContent = '◇'; return o; }
 const toParas = s => s.split('\n').map(x => x.trim()).filter(Boolean);
 const BREAK = '。！？；，、：…!?;,. \n';
 
-function trySplit(paras, dc, cont, comment = false){
+function trySplit(paras, dc, cont, comment = false, ill = null){
   const full = paras.join('\n');
   let lo = 1, hi = full.length - 1, best = 0;
   while (lo <= hi){
     const mid = (lo + hi) >> 1;
-    const el = postEl(toParas(full.slice(0, mid)), '', {dc, cont, by:false, comment});
+    const el = postEl(toParas(full.slice(0, mid)), '', {dc, cont, by:false, comment, ill});
     MB.append(el); const ok = !overflows(); el.remove();
     if (ok){ best = mid; lo = mid + 1; } else hi = mid - 1;
   }
@@ -360,10 +403,12 @@ function trySplit(paras, dc, cont, comment = false){
   for (let k = best; k > best - 26 && k > 10; k--){ if (BREAK.includes(full[k-1])){ best = k; break; } }
   const rest = toParas(full.slice(best));
   if (!rest.length) return null;
-  return { el: postEl(toParas(full.slice(0, best)), '', {dc, cont, by:false, comment}), rest };
+  return { el: postEl(toParas(full.slice(0, best)), '', {dc, cont, by:false, comment, ill}), rest };
 }
 
 let pages = [], chapterNo = 0, days = [];
+let illAt = -99;                     // 上一张插画所在页；至少隔三页才再放一张
+const ILL_GAP = 3;
 let pageKey = '', pageAnchor = null;
 function flushPage(){
   pages.push({ type:'text', key:pageKey, html:MB.innerHTML, anchor:pageAnchor });
@@ -380,16 +425,17 @@ function paginateDay(day){
     for (let guard = 0; guard < 60; guard++){
       const had = MB.childElementCount > 0;
       const orn = had ? ornEl() : null; if (orn) MB.append(orn);
-      const el = postEl(paras, p.pk, {dc: first && !cont && !p.comment, cont, comment:!!p.comment});
+      const ill = (!cont && p.img && pages.length - illAt >= ILL_GAP) ? p.img : null;
+      const el = postEl(paras, p.pk, {dc: first && !cont && !p.comment, cont, comment:!!p.comment, ill});
       MB.append(el);
-      if (!overflows()){ if (!pageAnchor) pageAnchor = p.id; break; }
+      if (!overflows()){ if (!pageAnchor) pageAnchor = p.id; if (ill) illAt = pages.length; break; }
       el.remove();
       const used = orn ? orn.offsetTop + orn.offsetHeight : 0;
       const free = MB.clientHeight - used;
-      const split = (!had || free > MB.clientHeight * 0.38) ? trySplit(paras, first && !cont && !p.comment, cont, !!p.comment) : null;
-      if (split){ MB.append(split.el); if (!pageAnchor) pageAnchor = p.id; flushPage(); paras = split.rest; cont = true; continue; }
+      const split = (!had || free > MB.clientHeight * 0.38) ? trySplit(paras, first && !cont && !p.comment, cont, !!p.comment, ill) : null;
+      if (split){ MB.append(split.el); if (!pageAnchor) pageAnchor = p.id; if (ill) illAt = pages.length; flushPage(); paras = split.rest; cont = true; continue; }
       if (orn) orn.remove();
-      if (!had){ MB.append(el); if (!pageAnchor) pageAnchor = p.id; flushPage(); break; }
+      if (!had){ MB.append(el); if (!pageAnchor) pageAnchor = p.id; if (ill) illAt = pages.length; flushPage(); break; }
       flushPage();
     }
     first = false;
@@ -546,7 +592,7 @@ function applyFresh(){
   const merged = new Map();
   days.flatMap(d => d.posts).concat(posts).forEach(p => merged.set(p.id, p));
   days = groupDays([...merged.values()]);
-  pages = [{ type:'cover' }]; chapterNo = 0;
+  pages = [{ type:'cover' }]; chapterNo = 0; illAt = -99;
   days.forEach(paginateDay);
   if (exhausted) pages.push({ type:'end' });
   bar.hidden = true;
@@ -740,9 +786,17 @@ function render(i){
     el.innerHTML = '<div class="end"><p class="orn">· ◇ ·</p><h2>全书完</h2><p>共 ' + cn(chapterNo) + ' 章 · ' + cn(n) + ' 篇</p></div>';
   }
   el.querySelectorAll('.by[data-pk]').forEach(b => { b.textContent = '—— ' + nameOf(b.dataset.pk); });  // 昵称晚到也能补上
+  el.querySelectorAll('.ill img[data-src]').forEach(im => { im.src = im.dataset.src; });
   const sh = document.createElement('i'); sh.className = 'sheen'; el.append(sh);
   return el;
 }
+// 插画加载好了淡入；代理取不到就退回原图，原图也坏了就把这张图收起来
+book.addEventListener('load', e => { const t = e.target; if (t.tagName === 'IMG' && t.closest('.ill')) t.classList.add('ok'); }, true);
+book.addEventListener('error', e => {
+  const t = e.target; if (t.tagName !== 'IMG' || !t.closest('.ill')) return;
+  if (t.dataset.raw && t.src !== t.dataset.raw){ t.src = t.dataset.raw; return; }
+  t.closest('.ill').classList.add('gone');
+}, true);
 function bindCover(el){
   const f = el.querySelector('#login');
   if (f) f.addEventListener('submit', e => { e.preventDefault();
@@ -839,7 +893,7 @@ document.getElementById('toCover').addEventListener('click', () => { bar.hidden 
 document.getElementById('logout').addEventListener('click', () => { bar.hidden = true; logout(); });
 
 /* ---------- 会话 ---------- */
-function reset(){ stopLive(); clearTimeout(flushTimer); flushTimer = null; fresh = []; applyPending = false; checking = false; pendingFollowBackfill = new Map(); commentsBackfillNeeded = false; selfBackfillNeeded = false; findingRelayHints = false; lastCheck = 0; lastFollowsCheck = 0; pages = [{ type:'cover' }]; chapterNo = 0; days = []; held = []; seen = new Set(); exhausted = false; loading = false; follows = []; updateDot(); }
+function reset(){ stopLive(); clearTimeout(flushTimer); flushTimer = null; fresh = []; applyPending = false; checking = false; pendingFollowBackfill = new Map(); commentsBackfillNeeded = false; selfBackfillNeeded = false; findingRelayHints = false; lastCheck = 0; lastFollowsCheck = 0; pages = [{ type:'cover' }]; chapterNo = 0; illAt = -99; days = []; held = []; seen = new Set(); exhausted = false; loading = false; follows = []; updateDot(); }
 function logout(){ session = null; LS.del('book.pk'); LS.del(CACHE_KEY); reset(); coverState = 'login'; coverError = ''; show(0); }
 async function start(pk, demo = false){
   reset(); session = { pk, demo }; cursor = Math.floor(Date.now() / 1000);
@@ -924,7 +978,7 @@ function repaginate(){
   if (!days.length) return;
   if (busy){ later(); return; }                                  // 翻页动画中重排会留下一张旧页，等动画结束
   const a = pages[idx] && pages[idx].anchor, ty = pages[idx] && pages[idx].type;
-  pages = [{ type:'cover' }]; chapterNo = 0;
+  pages = [{ type:'cover' }]; chapterNo = 0; illAt = -99;
   days.forEach(paginateDay);
   if (exhausted) pages.push({ type:'end' });
   let at = a ? pages.findIndex(p => p.anchor === a && p.type === ty) : -1;

@@ -360,7 +360,7 @@ async function ensureNames(pks){
 
 /* ---------- 正文清理：只留文字 ---------- */
 const CONTENT_KINDS = [1, 1111];
-const MIN_HAN = 20;                       // 动态和评论都要有至少 20 个自己写的汉字
+const MIN_HAN = 15;                       // 动态和评论都要有至少 15 个自己写的汉字
 const hanCount = lines => lines.filter(line => !/^[>＞]/.test(String(line).trim())).join('').match(/\p{Script=Han}/gu)?.length || 0;
 function clean(ev){
   if (!CONTENT_KINDS.includes(ev.kind)) return null;
@@ -755,11 +755,11 @@ async function checkFresh(auto = false){
     queueFresh(batches.flat());
     if (commentsBackfillNeeded) {
       commentsBackfillNeeded = false;
-      LS.set('book.commentsBackfilled.v1.'+sess.pk, true);
+      LS.set('book.commentsBackfilled.v2.'+sess.pk, true);
     }
     if (selfBackfillNeeded) {
       selfBackfillNeeded = false;
-      LS.set('book.selfBackfilled.v1.'+sess.pk, true);
+      LS.set('book.selfBackfilled.v2.'+sess.pk, true);
     }
     if (auto && fresh.length && idx <= 2){ clearTimeout(flushTimer); flushTimer = null; applyFresh(); }
   } catch(e) {
@@ -1080,8 +1080,8 @@ function reset(){ stopLive(); clearTimeout(flushTimer); flushTimer = null; fresh
 function logout(){ session = null; LS.del('book.pk'); LS.del(CACHE_KEY); reset(); coverState = 'login'; coverError = ''; show(0); }
 async function start(pk, demo = false){
   reset(); session = { pk, demo }; cursor = Math.floor(Date.now() / 1000);
-  commentsBackfillNeeded = !demo && !LS.get('book.commentsBackfilled.v1.'+pk,false);
-  selfBackfillNeeded = !demo && !LS.get('book.selfBackfilled.v1.'+pk,false);
+  commentsBackfillNeeded = !demo && !LS.get('book.commentsBackfilled.v2.'+pk,false);
+  selfBackfillNeeded = !demo && !LS.get('book.selfBackfilled.v2.'+pk,false);
   coverState = 'loading'; coverError = ''; show(0);
   if (demo){ buildDemo(); readerName = '示例读者'; }
   else {
@@ -1123,8 +1123,8 @@ function restore(pk){
   const c = LS.get(CACHE_KEY, null);
   if (!c || c.v !== 1 || c.pk !== pk || !Array.isArray(c.posts) || !c.posts.length) return false;
   reset(); session = { pk, demo:false };
-  commentsBackfillNeeded = !LS.get('book.commentsBackfilled.v1.'+pk,false);
-  selfBackfillNeeded = !LS.get('book.selfBackfilled.v1.'+pk,false);
+  commentsBackfillNeeded = !LS.get('book.commentsBackfilled.v2.'+pk,false);
+  selfBackfillNeeded = !LS.get('book.selfBackfilled.v2.'+pk,false);
   follows = c.follows || []; cursor = c.cursor; exhausted = !!c.exhausted; held = c.held || [];
   c.posts.concat(held).forEach(p => seen.add(p.id));
   const keep = p => hanCount(p.paras || []) >= MIN_HAN;           // 存档里的旧短帖也滤掉
@@ -1212,7 +1212,7 @@ function buildDemo(){
 /* ---------- 启动 ---------- */
 window.bookWriterReader = () => session && !session.demo ? session.pk : null;
 // Only accept the writer's successfully published event for the current identity.
-// All notes and NIP-10 / NIP-22 comments pass the shared 20-Han clean() filter.
+// All notes and NIP-10 / NIP-22 comments pass the shared 15-Han clean() filter.
 window.addEventListener('nostr-book:published', e => {
   const event = e.detail;
   if (!session || session.demo || !event || event.pubkey !== session.pk) return;

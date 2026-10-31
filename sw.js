@@ -1,4 +1,4 @@
-const CACHE = 'book-v28';
+const CACHE = 'book-v29';
 // 字体单独一个长期缓存：发新版时不清掉，免得每次更新都退回系统宋体、重新下载
 const FONT_CACHE = 'book-fonts-v1';
 const SHELL = ['./', 'index.html', 'writer.js', 'vendor/noble-secp256k1.js', 'manifest.json', 'icon-512.png'];

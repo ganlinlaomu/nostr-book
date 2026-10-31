@@ -484,6 +484,8 @@ function trySplit(paras, dc, cont, comment = false, ill = null, post = null){
 }
 
 let pages = [], chapterNo = 0, days = [];
+// Page 0 is the cover and page 1 is a chapter title; find actual post text.
+const latestTextPage = () => pages.findIndex(p => p.type === 'text');
 let illAt = -99;                     // 上一张插画所在页；至少隔三页才再放一张
 const ILL_GAP = 3;
 let pageKey = '', pageAnchor = null;
@@ -676,8 +678,9 @@ function applyFresh(jumpToLatest = false){
   days.forEach(paginateDay);
   if (exhausted) pages.push({ type:'end' });
   bar.hidden = true;
-  show(forceLatest ? Math.min(1, pages.length - 1) :
-    (prevIndex <= 2 ? Math.min(Math.max(1,prevIndex), pages.length - 1) : Math.min(1,pages.length - 1)));
+  const latest = latestTextPage();
+  if (forceLatest && latest >= 0) show(latest);
+  else show(prevIndex <= 2 ? Math.min(Math.max(1,prevIndex), pages.length - 1) : Math.min(1,pages.length - 1));
   saveCache();
   updateDot();
 }
@@ -1058,7 +1061,11 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown'){ e.preventDefault(); go(1); }
   if (e.key === 'ArrowLeft' || e.key === 'PageUp'){ e.preventDefault(); go(-1); }
 });
-document.getElementById('toLatest').addEventListener('click', () => { bar.hidden = true; if (fresh.length) applyFresh(); else if (pages.length > 1) show(1); });
+document.getElementById('toLatest').addEventListener('click', () => {
+  bar.hidden = true;
+  if (fresh.length) applyFresh(true);
+  else { const latest = latestTextPage(); if (latest >= 0) show(latest); }
+});
 document.getElementById('newPosts').addEventListener('click', applyFresh);
 document.getElementById('syncNow').addEventListener('click', async () => {
   if (!session || session.demo) return;
@@ -1220,11 +1227,12 @@ window.addEventListener('nostr-book:published', e => {
   const event = e.detail;
   if (!session || session.demo || !event || event.pubkey !== session.pk) return;
   queueFresh([event]);
-  // On publish, return to the newest reading page (even if a short reply is filtered).
+  // On publish, skip the date-chapter title and open the newest page with post text.
+  // Even a successfully published reply below the book's length threshold returns there.
   clearTimeout(flushTimer); flushTimer = null;
   bar.hidden = true;
   if (fresh.length) applyFresh(true);
-  else if (pages.length > 1) show(1);
+  else { const latest = latestTextPage(); if (latest >= 0) show(latest); }
   toast('发表成功');
 });
 reset();

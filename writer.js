@@ -141,13 +141,13 @@ async function flushDraft(){
   try{await draftIO(key,text);if(pk===activePk)saveHint.textContent='已保存';return true;}
   catch(e){if(pk===activePk){saveHint.textContent='保存失败';showStatus('本地存储不可用，请先复制文字备份',true);}return false;}
 }
-const HAN_MIN = 20;
+const HAN_MIN = 15;
 function updateReplyHint(){
   const hint=$('writerHint');
   if(!replyCtx){hint.hidden=true;return;}
   const n=(editor.value.match(/\p{Script=Han}/gu)||[]).length;
   hint.hidden=n>=HAN_MIN;
-  hint.textContent='不足二十个汉字的回复会正常发出，但不会收进书里';
+  hint.textContent='不足十五个汉字的回复会正常发出，但不会收进书里';
 }
 function scheduleDraft(){
   updateReplyHint();
@@ -223,7 +223,6 @@ async function openWriter(ctx=null){
   editor.value='';showPanel(null);status.textContent='';
   updateKeyBadge();
   overlay.hidden=false;
-  $('writerPublished').hidden=true;
   $('writerTitle').textContent=replyCtx?'回复':'随笔';
   updateReplyHint();
   const generation=draftGeneration, key=draftKey;
@@ -404,7 +403,7 @@ async function signAndSend(){
   if(!cached && !password){showStatus('请输入本地解锁密码',true);return;}
   if(!content){showStatus('正文为空',true);return;}
   if(content.length>MAX_CONTENT){showStatus('正文过长',true);return;}
-  let sk;
+  let sk, publishedEvent = null;
   setBusy(true);
   unlockPassInput.value='';
   try{
@@ -445,14 +444,18 @@ async function signAndSend(){
     if(pk!==activePk)return;
     const ok=result.filter(r=>r.ok).length;
     if(!ok)throw Error('未收到 Relay 接受确认；草稿保留。若网络不稳定，请先检查是否已发布，避免重复发帖');
-    // The event has been accepted; display it immediately without waiting for relay echo.
-    window.dispatchEvent(new CustomEvent('nostr-book:published', {detail:event}));
-    await draftIO(key,'');
+    // A Relay OK is a confirmed publish. Clear the draft, then close and navigate.
+    try{await draftIO(key,'');}catch(e){console.warn('已发表，但本地草稿清理失败',e);}
     editor.value='';saveHint.textContent='草稿已清空';
-    showStatus('发表成功 · '+ok+' 个 Relay 已接收 · 15 分钟内免验证');
-    $('writerPublished').hidden=false;
+    publishedEvent=event;
   }catch(e){if(pk===activePk)showStatus(e.message||'发表失败，草稿已保留',true);}
-  finally{sk?.fill(0);setBusy(false);}
+  finally{
+    sk?.fill(0);setBusy(false);
+    if(publishedEvent && pk===activePk){
+      closeWriter();
+      window.dispatchEvent(new CustomEvent('nostr-book:published', {detail:publishedEvent}));
+    }
+  }
 }
 $('writePost').addEventListener('click',()=>openWriter());
 window.addEventListener('nostr-book:reply',e=>openWriter(e.detail));
@@ -464,7 +467,6 @@ $('writerFaceId').addEventListener('click',enableFaceId);
 $('writerFaceIdOff').addEventListener('click',disableFaceId);
 publishButton.addEventListener('click',publish);
 $('writerSend').addEventListener('click',signAndSend);
-$('writerPublished').addEventListener('click',()=>{ $('writerPublished').hidden=true;closeWriter(); });
 overlay.addEventListener('keydown',e=>{
   if(e.key==='Escape'&&!opBusy){e.preventDefault();closeWriter();}
   if((e.key==='Enter')&&(e.target===unlockPassInput)){e.preventDefault();signAndSend();}

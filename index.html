@@ -241,7 +241,6 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
       <div class="writer-footer-actions">
         <button type="button" id="writerFaceId" hidden>启用 Face ID</button>
         <button type="button" id="writerImport">私钥</button>
-        <button type="button" id="writerPublished" hidden>返回阅读</button>
       </div>
     </footer>
   </div>
@@ -580,7 +579,7 @@ async function loadMore(){
 }
 
 /* ---------- 实时同步：订阅新动态，定时补漏，回到前台恢复 ---------- */
-let fresh = [], lastCheck = 0, checking = false, applyPending = false;
+let fresh = [], lastCheck = 0, checking = false, applyPending = false, jumpToLatestPending = false;
 let liveEpoch = 0, liveSockets = new Set(), liveTimers = new Set(), flushTimer = null;
 let hiddenAt = 0, lastFollowsCheck = 0;
 const BACKFILL_OVERLAP = 3600;     // 回看一小时，补齐延迟传播和临时掉线的事件
@@ -659,10 +658,13 @@ function updateDot(){
   const h = curEl && curEl.querySelector('.head'), pg = pages[idx];
   if (h && pg && pg.key) h.lastElementChild.outerHTML = whenHTML(pg.key);
 }
-function applyFresh(){
+function applyFresh(jumpToLatest = false){
   if (!fresh.length) return;
+  if (jumpToLatest === true) jumpToLatestPending = true;
   if (busy || loading){ applyPending = true; updateDot(); return; }
   applyPending = false;
+  const forceLatest = jumpToLatestPending;
+  jumpToLatestPending = false;
   const prevIndex = idx, posts = fresh;
   fresh = [];
   posts.forEach(p => seen.add(p.id));
@@ -674,7 +676,8 @@ function applyFresh(){
   days.forEach(paginateDay);
   if (exhausted) pages.push({ type:'end' });
   bar.hidden = true;
-  show(prevIndex <= 2 ? Math.min(Math.max(1,prevIndex), pages.length - 1) : Math.min(1,pages.length - 1));
+  show(forceLatest ? Math.min(1, pages.length - 1) :
+    (prevIndex <= 2 ? Math.min(Math.max(1,prevIndex), pages.length - 1) : Math.min(1,pages.length - 1)));
   saveCache();
   updateDot();
 }
@@ -1076,7 +1079,7 @@ document.getElementById('toCover').addEventListener('click', () => { bar.hidden 
 document.getElementById('logout').addEventListener('click', () => { bar.hidden = true; logout(); });
 
 /* ---------- 会话 ---------- */
-function reset(){ stopLive(); clearTimeout(flushTimer); flushTimer = null; fresh = []; applyPending = false; checking = false; pendingFollowBackfill = new Map(); commentsBackfillNeeded = false; selfBackfillNeeded = false; findingRelayHints = false; lastCheck = 0; lastFollowsCheck = 0; pages = [{ type:'cover' }]; chapterNo = 0; illAt = -99; days = []; held = []; seen = new Set(); exhausted = false; loading = false; follows = []; updateDot(); }
+function reset(){ stopLive(); clearTimeout(flushTimer); flushTimer = null; fresh = []; applyPending = false; jumpToLatestPending = false; checking = false; pendingFollowBackfill = new Map(); commentsBackfillNeeded = false; selfBackfillNeeded = false; findingRelayHints = false; lastCheck = 0; lastFollowsCheck = 0; pages = [{ type:'cover' }]; chapterNo = 0; illAt = -99; days = []; held = []; seen = new Set(); exhausted = false; loading = false; follows = []; updateDot(); }
 function logout(){ session = null; LS.del('book.pk'); LS.del(CACHE_KEY); reset(); coverState = 'login'; coverError = ''; show(0); }
 async function start(pk, demo = false){
   reset(); session = { pk, demo }; cursor = Math.floor(Date.now() / 1000);
@@ -1217,6 +1220,12 @@ window.addEventListener('nostr-book:published', e => {
   const event = e.detail;
   if (!session || session.demo || !event || event.pubkey !== session.pk) return;
   queueFresh([event]);
+  // On publish, return to the newest reading page (even if a short reply is filtered).
+  clearTimeout(flushTimer); flushTimer = null;
+  bar.hidden = true;
+  if (fresh.length) applyFresh(true);
+  else if (pages.length > 1) show(1);
+  toast('发表成功');
 });
 reset();
 const ready = document.fonts ? document.fonts.ready : Promise.resolve();

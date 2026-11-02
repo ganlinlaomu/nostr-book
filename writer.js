@@ -148,8 +148,9 @@ function updateReplyHint(){
   const hint=$('writerHint');
   if(!replyCtx){hint.hidden=true;return;}
   const n=(editor.value.match(/\p{Script=Han}/gu)||[]).length;
-  hint.hidden=n>=HAN_MIN;
-  hint.textContent='不足十五个汉字的回复会正常发出，但不会收进书里';
+  const w=(editor.value.match(/\p{Script=Latin}[\p{Script=Latin}\p{M}'’-]*/gu)||[]).length;
+  hint.hidden=n>=HAN_MIN||w>=15;
+  hint.textContent='不足十五个汉字（或十五个英文单词）的回复会正常发出，但不会收进书里';
 }
 function scheduleDraft(){
   updateReplyHint();

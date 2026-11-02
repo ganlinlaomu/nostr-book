@@ -18,7 +18,7 @@ const confirmPassInput = $('writerNewPassConfirm');
 const unlockPassInput = $('writerUnlockPass');
 let activePk = null;
 let replyCtx = null;
-let reactCtx = null;      // 落「善」：需要密码时借写作页解锁，不动草稿      // 回复模式：被回复内容的 id / 作者 / kind；null 表示写随笔
+let reactCtx = null;      // 「善 / 否」需要密码时借写作页解锁，不动草稿
 let draftKey = null;      // 随笔草稿按 npub 存；每条回复各自一份草稿
 let saveTimer = null;
 let opBusy = false;
@@ -220,9 +220,10 @@ async function openWriter(ctx=null){
   if(ctx?.react){
     reactCtx=ctx;replyCtx=null;draftKey=null;activePk=pk;draftGeneration++;
     editor.hidden=true;editor.value='';showPanel(null);status.textContent='';saveHint.textContent='';
-    $('writerQuote').hidden=false;$('writerQuoteWho').textContent='落「善」于 '+(ctx.name||'')+'：';
+    const mark=ctx.reaction==='-'?'否':'善';
+    $('writerQuote').hidden=false;$('writerQuoteWho').textContent='落「'+mark+'」于 '+(ctx.name||'')+'：';
     $('writerQuoteText').textContent='「'+(ctx.text||'')+'」';
-    $('writerTitle').textContent='善';publishButton.textContent='落印';
+    $('writerTitle').textContent=mark;publishButton.textContent='落印';
     updateKeyBadge();updateReplyHint();overlay.hidden=false;
     return publish();
   }
@@ -401,15 +402,15 @@ async function broadcast(pk,event,extra){
   const result=await Promise.all(urls.map(url=>sendRelay(url,event)));
   return result.filter(r=>r.ok).length;
 }
-// NIP-25：content 为 "+"，e/p/k 指向被赞的这条
+// NIP-25：「善」发送 "+"，「否」发送 "-"，e/p/k 指向原文
 async function sendReaction(pk,ctx,sk){
   const hint=(ctx.relays||[]).map(safeRelay).find(Boolean)||'';
-  const event={kind:7,created_at:Math.floor(Date.now()/1000),content:'+',pubkey:pk,
+  const event={kind:7,created_at:Math.floor(Date.now()/1000),content:ctx.reaction==='-'?'-':'+',pubkey:pk,
     tags:[(hint?['e',ctx.id,hint,ctx.pk]:['e',ctx.id]),(hint?['p',ctx.pk,hint]:['p',ctx.pk]),['k',String(ctx.kind||1)],['client','驿书']]};
   await signEvent(pk,sk,event);
   return broadcast(pk,event,ctx.relays);
 }
-const reacted = (id,ok,message) => window.dispatchEvent(new CustomEvent('nostr-book:reacted',{detail:{id,ok,message}}));
+const reacted = (ctx,reader,ok,message) => window.dispatchEvent(new CustomEvent('nostr-book:reacted',{detail:{id:ctx.id,reaction:ctx.reaction,reader,ok,message}}));
 let reacting=false;
 async function react(ctx){
   const pk=currentReader();
@@ -418,7 +419,7 @@ async function react(ctx){
   let sk=sessionSk(pk)?.slice()||null;
   if(!sk && getFaceWrap(pk) && faceCapable()){
     try{ const s=await faceUnlock(pk); startSession(pk,s); sk=s; }
-    catch(e){ if(e.name==='NotAllowedError'){ reacted(ctx.id,false,'已取消'); return; } }
+    catch(e){ if(e.name==='NotAllowedError'){ reacted(ctx,pk,false,'已取消'); return; } }
   }
   if(!sk) return openWriter(ctx);                           // 需要密码：借写作页解锁
   reacting=true;
@@ -426,8 +427,8 @@ async function react(ctx){
     if(!navigator.onLine)throw Error('当前离线，稍后再试');
     const ok=await sendReaction(pk,ctx,sk);
     if(!ok)throw Error('未收到 Relay 确认，请稍后再试');
-    reacted(ctx.id,true);
-  }catch(e){ reacted(ctx.id,false,e.message||'落印失败'); }
+    reacted(ctx,pk,true);
+  }catch(e){ reacted(ctx,pk,false,e.message||'落印失败'); }
   finally{ sk.fill(0); reacting=false; }
 }
 async function publish(){
@@ -466,7 +467,7 @@ async function signAndSend(){
     if(!content){showStatus('正文为空',true);return;}
     if(content.length>MAX_CONTENT){showStatus('正文过长',true);return;}
   }
-  let sk, publishedEvent = null, reactedId = null;
+  let sk, publishedEvent = null, reactedCtx = null;
   setBusy(true);
   unlockPassInput.value='';
   try{
@@ -487,7 +488,7 @@ async function signAndSend(){
       const ok=await sendReaction(pk,rc,sk);
       sk.fill(0);sk=null;
       if(!ok)throw Error('未收到 Relay 确认，请稍后再试');
-      reactedId=rc.id;
+      reactedCtx=rc;
       return;
     }
     const ctx=replyCtx, key=draftKey||pk;
@@ -523,7 +524,7 @@ async function signAndSend(){
   }catch(e){if(pk===activePk)showStatus(e.message||'发表失败，草稿已保留',true);}
   finally{
     sk?.fill(0);setBusy(false);
-    if(reactedId && pk===activePk){ closeWriter(); reacted(reactedId,true); }
+    if(reactedCtx && pk===activePk){ closeWriter(); reacted(reactedCtx,pk,true); }
     if(publishedEvent && pk===activePk){
       closeWriter();
       window.dispatchEvent(new CustomEvent('nostr-book:published', {detail:publishedEvent}));

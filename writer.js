@@ -17,7 +17,8 @@ const newPassInput = $('writerNewPass');
 const confirmPassInput = $('writerNewPassConfirm');
 const unlockPassInput = $('writerUnlockPass');
 let activePk = null;
-let replyCtx = null;      // 回复模式：被回复内容的 id / 作者 / kind；null 表示写随笔
+let replyCtx = null;
+let reactCtx = null;      // 落「善」：需要密码时借写作页解锁，不动草稿      // 回复模式：被回复内容的 id / 作者 / kind；null 表示写随笔
 let draftKey = null;      // 随笔草稿按 npub 存；每条回复各自一份草稿
 let saveTimer = null;
 let opBusy = false;
@@ -137,6 +138,7 @@ async function draftIO(pk,text){
 async function flushDraft(){
   clearTimeout(saveTimer);saveTimer=null;
   if (!activePk) return;
+  if (reactCtx) return true;
   const pk=activePk, key=draftKey||pk, text=editor.value;
   try{await draftIO(key,text);if(pk===activePk)saveHint.textContent='已保存';return true;}
   catch(e){if(pk===activePk){saveHint.textContent='保存失败';showStatus('本地存储不可用，请先复制文字备份',true);}return false;}
@@ -214,6 +216,15 @@ async function openWriter(ctx=null){
   if(opBusy)return;
   const pk=currentReader();
   if(!pk){showStatus('只读示例不支持发表');return;}
+  if(ctx?.react){
+    reactCtx=ctx;replyCtx=null;draftKey=null;activePk=pk;draftGeneration++;
+    editor.hidden=true;editor.value='';showPanel(null);status.textContent='';saveHint.textContent='';
+    $('writerQuote').hidden=false;$('writerQuoteWho').textContent='落「善」于 '+(ctx.name||'')+'：';
+    $('writerQuoteText').textContent='「'+(ctx.text||'')+'」';
+    $('writerTitle').textContent='善';publishButton.textContent='落印';
+    updateKeyBadge();updateReplyHint();overlay.hidden=false;
+    return publish();
+  }
   replyCtx=ctx && /^[0-9a-f]{64}$/.test(ctx.id||'') && /^[0-9a-f]{64}$/.test(ctx.pk||'') ? ctx : null;
   draftKey=replyCtx ? pk+'#reply:'+replyCtx.id : pk;
   $('writerQuote').hidden=!replyCtx;
@@ -239,7 +250,8 @@ function closeWriter(){
   overlay.hidden=true;
   showPanel(null);
   secretInput.value='';newPassInput.value='';confirmPassInput.value='';unlockPassInput.value='';
-  activePk=null;replyCtx=null;draftKey=null;
+  activePk=null;replyCtx=null;draftKey=null;reactCtx=null;
+  editor.hidden=false;publishButton.textContent='发表';
   if(faceSetup){faceSetup.sk.fill(0);faceSetup=null;}
   updateFaceIdButton();
   $('writerQuote').hidden=true;$('writerHint').hidden=true;
@@ -371,11 +383,59 @@ async function importKey(){
     setBusy(false);
   }
 }
+/* ---------- 签名与发送（随笔、回复、「善」共用） ---------- */
+async function signEvent(pk,sk,event){
+  const lib=await schnorr();
+  if(b2h(lib.getPublicKey(sk))!==pk)throw Error('密钥与当前阅读账号不匹配');
+  const canonical=JSON.stringify([0,event.pubkey,event.created_at,event.kind,event.tags,event.content]);
+  event.id=b2h(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(canonical))));
+  const digest=h2b(event.id);
+  event.sig=b2h(await lib.signAsync(digest,sk));
+  if(!await lib.verifyAsync(hexb(event.sig),digest,hexb(pk)))throw Error('本地签名校验失败，未发送');
+  return event;
+}
+async function broadcast(pk,event,extra){
+  const urls=[...new Set([...writeRelays(pk),...(extra||[]).map(safeRelay).filter(Boolean)])].slice(0,9);
+  if(!urls.length)throw Error('没有可用的写入 Relay');
+  const result=await Promise.all(urls.map(url=>sendRelay(url,event)));
+  return result.filter(r=>r.ok).length;
+}
+// NIP-25：content 为 "+"，e/p/k 指向被赞的这条
+async function sendReaction(pk,ctx,sk){
+  const hint=(ctx.relays||[]).map(safeRelay).find(Boolean)||'';
+  const event={kind:7,created_at:Math.floor(Date.now()/1000),content:'+',pubkey:pk,
+    tags:[(hint?['e',ctx.id,hint,ctx.pk]:['e',ctx.id]),(hint?['p',ctx.pk,hint]:['p',ctx.pk]),['k',String(ctx.kind||1)],['client','驿书']]};
+  await signEvent(pk,sk,event);
+  return broadcast(pk,event,ctx.relays);
+}
+const reacted = (id,ok,message) => window.dispatchEvent(new CustomEvent('nostr-book:reacted',{detail:{id,ok,message}}));
+let reacting=false;
+async function react(ctx){
+  const pk=currentReader();
+  if(!pk || !ctx || !/^[0-9a-f]{64}$/.test(ctx.id||'') || !/^[0-9a-f]{64}$/.test(ctx.pk||'') || opBusy || reacting)return;
+  if(!getVault(pk)) return openWriter(ctx);                 // 还没设私钥：走写作页的设置流程
+  let sk=sessionSk(pk)?.slice()||null;
+  if(!sk && getFaceWrap(pk) && faceCapable()){
+    try{ const s=await faceUnlock(pk); startSession(pk,s); sk=s; }
+    catch(e){ if(e.name==='NotAllowedError'){ reacted(ctx.id,false,'已取消'); return; } }
+  }
+  if(!sk) return openWriter(ctx);                           // 需要密码：借写作页解锁
+  reacting=true;
+  try{
+    if(!navigator.onLine)throw Error('当前离线，稍后再试');
+    const ok=await sendReaction(pk,ctx,sk);
+    if(!ok)throw Error('未收到 Relay 确认，请稍后再试');
+    reacted(ctx.id,true);
+  }catch(e){ reacted(ctx.id,false,e.message||'落印失败'); }
+  finally{ sk.fill(0); reacting=false; }
+}
 async function publish(){
   if(opBusy||!activePk)return;
   const content=editor.value.trim();
-  if(!content){showStatus('请先写点什么',true);editor.focus();return;}
-  if(content.length>MAX_CONTENT){showStatus('正文过长，请保持在 12000 字符以内',true);return;}
+  if(!reactCtx){
+    if(!content){showStatus('请先写点什么',true);editor.focus();return;}
+    if(content.length>MAX_CONTENT){showStatus('正文过长，请保持在 12000 字符以内',true);return;}
+  }
   const pk=activePk;
   if(!getVault(pk)){await flushDraft();showPanel('setup');showStatus('');secretInput.focus();return;}
   if(!navigator.onLine){await flushDraft();showStatus('当前离线，草稿已保存；联网后可发表',true);return;}
@@ -401,9 +461,11 @@ async function signAndSend(){
   const pk=activePk, content=editor.value.trim(),password=unlockPassInput.value;
   const cached=sessionSk(pk);
   if(!cached && !password){showStatus('请输入本地解锁密码',true);return;}
-  if(!content){showStatus('正文为空',true);return;}
-  if(content.length>MAX_CONTENT){showStatus('正文过长',true);return;}
-  let sk, publishedEvent = null;
+  if(!reactCtx){
+    if(!content){showStatus('正文为空',true);return;}
+    if(content.length>MAX_CONTENT){showStatus('正文过长',true);return;}
+  }
+  let sk, publishedEvent = null, reactedId = null;
   setBusy(true);
   unlockPassInput.value='';
   try{
@@ -418,6 +480,15 @@ async function signAndSend(){
     const actualPk=b2h(lib.getPublicKey(sk));
     if(actualPk!==pk)throw Error('密钥与当前阅读账号不匹配');
     if(!cached) startSession(pk,sk);
+    if(reactCtx){
+      const rc=reactCtx;
+      showPanel(null);showStatus('正在落印…');
+      const ok=await sendReaction(pk,rc,sk);
+      sk.fill(0);sk=null;
+      if(!ok)throw Error('未收到 Relay 确认，请稍后再试');
+      reactedId=rc.id;
+      return;
+    }
     const ctx=replyCtx, key=draftKey||pk;
     const event={kind:1,created_at:Math.floor(Date.now()/1000),tags:[['client','驿书']],content,pubkey:pk};
     if(ctx){
@@ -451,6 +522,7 @@ async function signAndSend(){
   }catch(e){if(pk===activePk)showStatus(e.message||'发表失败，草稿已保留',true);}
   finally{
     sk?.fill(0);setBusy(false);
+    if(reactedId && pk===activePk){ closeWriter(); reacted(reactedId,true); }
     if(publishedEvent && pk===activePk){
       closeWriter();
       window.dispatchEvent(new CustomEvent('nostr-book:published', {detail:publishedEvent}));
@@ -459,6 +531,7 @@ async function signAndSend(){
 }
 $('writePost').addEventListener('click',()=>openWriter());
 window.addEventListener('nostr-book:reply',e=>openWriter(e.detail));
+window.addEventListener('nostr-book:react',e=>react(e.detail));
 closeButton.addEventListener('click',closeWriter);
 editor.addEventListener('input',scheduleDraft);
 importButton.addEventListener('click',()=>{showPanel('setup');showStatus('');secretInput.focus();});

@@ -21,13 +21,15 @@
 /* Layout: one full-screen paper page; pages turn on the left spine like a bound book */
 :root{
   --paper:#f3ecdc; --ink:#2a251e; --muted:#94866d; --accent:#8a6a3c;
-  --rule:#cdbf9f; --spine:rgba(90,62,20,.16); --shade:rgba(40,28,10,.22); --bar:rgba(243,236,220,.94);
+  --rule:#cdbf9f; --seal:#b23a2c; --spine:rgba(90,62,20,.16); --shade:rgba(40,28,10,.22); --bar:rgba(243,236,220,.94);
   --serif:'Noto Serif SC','Songti SC','STSong','Source Han Serif SC','SimSun',serif;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --seal:#c95a4b;
   --paper:#1d1914; --ink:#e6dccb; --muted:#8c7f69; --accent:#c9a46a;
   --rule:#4a4133; --spine:rgba(0,0,0,.45); --shade:rgba(0,0,0,.5); --bar:rgba(29,25,20,.94); color-scheme:dark}}
 :root[data-theme="dark"]{
+  --seal:#c95a4b;
   --paper:#1d1914; --ink:#e6dccb; --muted:#8c7f69; --accent:#c9a46a;
   --rule:#4a4133; --spine:rgba(0,0,0,.45); --shade:rgba(0,0,0,.5); --bar:rgba(29,25,20,.94); color-scheme:dark}
 html{box-sizing:border-box;height:100%}
@@ -82,6 +84,12 @@ body{height:100%;margin:0;background:var(--paper);color:var(--ink);font-family:v
 .reply-pop{position:absolute;z-index:13;display:flex;gap:2px;background:var(--bar);border:.5px solid var(--rule);border-radius:3px;
   box-shadow:0 2px 14px rgba(0,0,0,.1);padding:2px 4px}
 .reply-pop button{border:0;font-size:13px;letter-spacing:.2em;text-indent:.2em;padding:7px 14px;color:var(--accent)}
+.reply-pop button+button{border-left:.5px solid var(--rule);border-radius:0}
+.reply-pop #likeGo{color:var(--seal)}
+.reply-pop #likeGo:disabled{color:var(--muted);opacity:1}
+/* 「善」：署名旁一枚朱红小印 */
+.seal{display:inline-block;margin-left:.7em;padding:1px 3px 0;font-size:11px;line-height:1.25;letter-spacing:0;font-weight:600;
+  color:var(--seal);border:1px solid var(--seal);border-radius:2px;transform:rotate(-5deg);opacity:.88;vertical-align:1px}
 .reply-pick{position:absolute;inset:auto 0 0 0;z-index:14;background:var(--bar);border-top:.5px solid var(--rule);
   padding:14px max(18px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px));
   display:flex;flex-direction:column;gap:2px;box-shadow:0 -4px 18px rgba(0,0,0,.08)}
@@ -208,7 +216,7 @@ button:focus-visible,input:focus-visible{outline:1.5px solid var(--accent);outli
   </div>
   <button type="button" class="new-posts" id="newPosts" aria-live="polite" hidden></button>
   <div class="toast" id="toast" hidden></div>
-  <div class="reply-pop" id="replyPop" hidden><button type="button" id="replyGo">回复</button></div>
+  <div class="reply-pop" id="replyPop" hidden><button type="button" id="likeGo">善</button><button type="button" id="replyGo">回复</button></div>
   <div class="reply-pick" id="replyPick" hidden></div>
 </div>
 <section class="writer-overlay" id="writerOverlay" role="dialog" aria-modal="true" aria-labelledby="writerTitle" hidden>
@@ -872,6 +880,7 @@ function render(i){
   el.querySelectorAll('.by[data-pk]').forEach(b => { b.textContent = '—— ' + nameOf(b.dataset.pk); });  // 昵称晚到也能补上
   el.querySelectorAll('.ill img[data-src]').forEach(im => { im.src = im.dataset.src; });
   el.querySelectorAll('.post.comment[data-to-pk]').forEach(d => { d.dataset.to = nameOf(d.dataset.toPk); });
+  stampSeals(el);
   const sh = document.createElement('i'); sh.className = 'sheen'; el.append(sh);
   return el;
 }
@@ -997,6 +1006,48 @@ function postInfo(id){
   for (const d of days) for (const p of d.posts) if (p.id === id) return p;
   return null;
 }
+// 我落过「善」的篇目：只记自己的，存本机，并从 relay 补回在别处点过的
+let liked = new Set(), likedFor = null;
+function likedSet(){
+  if (!session || session.demo) return new Set();
+  if (likedFor !== session.pk){ liked = new Set(LS.get('book.liked.v1.' + session.pk, [])); likedFor = session.pk; }
+  return liked;
+}
+function saveLiked(){ if (likedFor) LS.set('book.liked.v1.' + likedFor, [...liked].slice(-3000)); }
+function stampSeals(el){
+  if (!el) return;
+  const set = likedSet();
+  el.querySelectorAll('.post[data-id]').forEach(d => {
+    const by = d.querySelector('.by'); if (!by) return;
+    const has = by.querySelector('.seal');
+    if (set.has(d.dataset.id) && !has){ const s = document.createElement('span'); s.className = 'seal'; s.textContent = '善'; by.append(s); }
+    else if (!set.has(d.dataset.id) && has) has.remove();
+  });
+}
+async function syncLiked(){
+  if (!session || session.demo) return;
+  const me = session.pk, since = Math.floor(Date.now() / 1000) - 90 * 86400;
+  const evs = await query([{ kinds:[7], authors:[me], since, limit:500 }], 8000, [...new Set([...RELAYS, ...(relayHints[me] || [])])]);
+  if (!session || session.pk !== me) return;
+  const set = likedSet(); let n = set.size;
+  evs.forEach(e => { if (e.content === '-') return; const t = (e.tags || []).filter(x => x[0] === 'e').pop(); if (t && /^[0-9a-f]{64}$/.test(t[1])) set.add(t[1]); });
+  if (set.size !== n){ saveLiked(); stampSeals(curEl); }
+}
+function likePost(id){
+  const p = postInfo(id); hideReplyUI(); bar.hidden = true;
+  if (!p || likedSet().has(id)) return;
+  // 同步派发：Face ID 必须在这次点按里直接调起
+  window.dispatchEvent(new CustomEvent('nostr-book:react', { detail: {
+    react: true, id: p.id, pk: p.pk, kind: p.k || 1, name: nameOf(p.pk),
+    text: p.paras.map(noEmoji).join(' ').slice(0, 160), relays: (relayHints[p.pk] || []).slice(0, 3) } }));
+}
+window.addEventListener('nostr-book:reacted', e => {
+  const d = e.detail || {};
+  if (!d.ok){ if (d.message) toast(d.message); return; }
+  if (!session || session.demo) return;
+  likedSet().add(d.id); saveLiked(); stampSeals(curEl);
+  toast('已落「善」');
+});
 function openReply(id){
   const p = postInfo(id); hideReplyUI(); bar.hidden = true;
   if (!p) return;
@@ -1018,6 +1069,8 @@ book.addEventListener('pointerdown', e => {
     post.classList.add('held');
     const r = post.getBoundingClientRect(), b = book.getBoundingClientRect();
     replyPop.dataset.id = post.dataset.id; replyPop.hidden = false;
+    const lk = document.getElementById('likeGo'), done = likedSet().has(post.dataset.id);
+    lk.textContent = done ? '已善' : '善'; lk.disabled = done;
     const top = Math.max(8, Math.min(sy - b.top - 56, b.height - 60));
     replyPop.style.top = top + 'px';
     replyPop.style.left = Math.max(12, Math.min(sx - b.left - replyPop.offsetWidth / 2, b.width - replyPop.offsetWidth - 12)) + 'px';
@@ -1028,6 +1081,7 @@ book.addEventListener('pointermove', e => { if (holdTimer && (Math.abs(e.clientX
 book.addEventListener('pointercancel', () => { clearTimeout(holdTimer); holdTimer = null; });
 book.addEventListener('contextmenu', e => { if (e.target.closest('.post')) e.preventDefault(); });
 document.getElementById('replyGo').addEventListener('click', () => openReply(replyPop.dataset.id));
+document.getElementById('likeGo').addEventListener('click', () => likePost(replyPop.dataset.id));
 // 工具栏「回复」：列出本页的几篇，选一篇来回
 document.getElementById('replyPage').addEventListener('click', () => {
   bar.hidden = true;
@@ -1111,6 +1165,7 @@ async function start(pk, demo = false){
   }
   await loadMore();
   coverState = 'ready';
+  syncLiked().catch(() => {});
   if (!demo){ startLive(); checkFresh(true); refreshRelayHints(); }
   if (idx === 0) show(0);
   if (pages.length > 1){
@@ -1146,6 +1201,7 @@ function restore(pk){
   readerName = nameOf(pk); coverState = 'ready';
   show(Math.min(1, pages.length - 1));                           // 打开总是从最新一页读起
   startLive();
+  syncLiked().catch(() => {});
   const fresh0 = () => { if (session && session.pk === pk) checkFresh(true); };
   refreshFollows(pk).then(fresh0, fresh0);
   refreshRelayHints();

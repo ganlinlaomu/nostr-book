@@ -368,7 +368,11 @@ async function ensureNames(pks){
 /* ---------- 正文清理：只留文字 ---------- */
 const CONTENT_KINDS = [1, 1111];
 const MIN_HAN = 15;                       // 动态和评论都要有至少 15 个自己写的汉字
-const hanCount = lines => lines.filter(line => !/^[>＞]/.test(String(line).trim())).join('').match(/\p{Script=Han}/gu)?.length || 0;
+const MIN_WORDS = 15;                     // 或者至少 15 个拉丁字母单词（英文等）
+const ownText = lines => lines.filter(line => !/^[>＞]/.test(String(line).trim())).join('\n');
+const hanCount = lines => ownText(lines).match(/\p{Script=Han}/gu)?.length || 0;
+const wordCount = lines => ownText(lines).match(/\p{Script=Latin}[\p{Script=Latin}\p{M}'’-]*/gu)?.length || 0;
+const longEnough = lines => hanCount(lines) >= MIN_HAN || wordCount(lines) >= MIN_WORDS;
 function clean(ev){
   if (!CONTENT_KINDS.includes(ev.kind)) return null;
   const tags = Array.isArray(ev.tags) ? ev.tags : [];
@@ -381,7 +385,7 @@ function clean(ev){
     .replace(/https?:\/\/\S+/gi, '').replace(/\bwww\.\S+/gi, '').replace(EMOJI, '')
     .replace(/[ \t　]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{2,}/g, '\n').trim();
   // Only count the commenter's own Han characters, not quoted parent content.
-  if (hanCount(s.split('\n')) < MIN_HAN) return null;
+  if (!longEnough(s.split('\n'))) return null;
   if (s.replace(/[\s\p{P}\p{S}]/gu, '').length < 4) return null;
   const extra = {};
   if (ev.kind !== 1) extra.k = ev.kind;
@@ -1192,7 +1196,7 @@ function restore(pk){
   selfBackfillNeeded = !LS.get('book.selfBackfilled.v2.'+pk,false);
   follows = c.follows || []; cursor = c.cursor; exhausted = !!c.exhausted; held = c.held || [];
   c.posts.concat(held).forEach(p => seen.add(p.id));
-  const keep = p => hanCount(p.paras || []) >= MIN_HAN;           // 存档里的旧短帖也滤掉
+  const keep = p => longEnough(p.paras || []);                    // 存档里的旧短帖也滤掉
   held = held.filter(keep);
   days = groupDays(c.posts.filter(keep));
   if (!days.length) return false;

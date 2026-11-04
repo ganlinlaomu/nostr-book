@@ -17,12 +17,20 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600&display=swap">
+<link rel="preload" href="fonts/literata-latin.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+/* 英文用 Literata（为电子书设计的衬线体，OFL 授权，随站自带；取 opsz 16 的静态常规体，各平台渲染一致）。
+   中文段落里只借它的字母和数字，引号破折号等标点仍走中文字体；整段英文的帖子才全部用它。 */
+@font-face{font-family:'Yishu Latin';src:url(fonts/literata-latin.woff2) format('woff2');font-weight:400;font-display:swap;unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+@font-face{font-family:'Yishu Latin';src:url(fonts/literata-latin-ext.woff2) format('woff2');font-weight:400;font-display:swap;unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF}
+@font-face{font-family:'Yishu Latin Core';src:url(fonts/literata-latin.woff2) format('woff2');font-weight:400;font-display:swap;unicode-range:U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153}
+@font-face{font-family:'Yishu Latin Core';src:url(fonts/literata-latin-ext.woff2) format('woff2');font-weight:400;font-display:swap;unicode-range:U+0100-024F, U+1E00-1EFF}
 /* Layout: one full-screen paper page; pages turn on the left spine like a bound book */
 :root{
   --paper:#f3ecdc; --ink:#2a251e; --muted:#94866d; --accent:#8a6a3c;
   --rule:#cdbf9f; --seal:#b23a2c; --spine:rgba(90,62,20,.16); --shade:rgba(40,28,10,.22); --bar:rgba(243,236,220,.94);
-  --serif:'Noto Serif SC','Songti SC','STSong','Source Han Serif SC','SimSun',serif;
+  --serif:'Yishu Latin Core','Noto Serif SC','Songti SC','STSong','Source Han Serif SC','SimSun',serif;
+  --serif-en:'Yishu Latin','Noto Serif SC','Songti SC','STSong',serif;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --seal:#c95a4b;
@@ -60,6 +68,9 @@ body{height:100%;margin:0;background:var(--paper);color:var(--ink);font-family:v
 .foot{text-align:center;font-size:12px;color:var(--muted);letter-spacing:.3em;padding-top:10px}
 .post p{margin:0;font-size:16.5px;line-height:1.95;text-align:justify;text-indent:2em;letter-spacing:.02em;overflow-wrap:anywhere}
 .post p+p{margin-top:.35em}
+.post[lang="en"]{font-family:var(--serif-en)}
+.post[lang="en"] p{letter-spacing:0;text-indent:1.5em;-webkit-hyphens:auto;hyphens:auto;line-height:1.8}
+.post[lang="en"] .by{font-family:var(--serif)}       /* 署名的「——」仍用中文破折号 */
 .post.comment[data-to]:not(.cont)::before{content:"评论 · 回" attr(data-to)}
 .post.comment:not(.cont)::before{content:"评论";display:block;font-size:11px;letter-spacing:.18em;color:var(--accent);margin-bottom:4px}
 .post.comment.cont::before{content:"续评";display:block;font-size:10px;letter-spacing:.15em;color:var(--muted);margin-bottom:4px}
@@ -448,6 +459,7 @@ function postEl(paras, pk, {dc = false, cont = false, by = true, comment = false
   paras = paras.map(x => noEmoji(x).trim()).filter(Boolean);       // 本地存档里的旧文字也去掉 emoji
   const d = document.createElement('div'); d.className = 'post' + (cont ? ' cont' : '') + (comment ? ' comment' : '');
   if (post){ d.dataset.id = post.id; d.dataset.pk = post.pk; if (post.to) d.dataset.toPk = post.to; }
+  if (wordCount(paras) >= 8 && hanCount(paras) < 5) d.lang = 'en';   // 英文为主的帖子：整段用英文字体、按英文断字
   if (ill) d.append(illEl(ill, paras.join('').length > 90));
   paras.forEach((tx, i) => {
     const p = document.createElement('p');
@@ -674,13 +686,28 @@ function updateDot(){
   const h = curEl && curEl.querySelector('.head'), pg = pages[idx];
   if (h && pg && pg.key) h.lastElementChild.outerHTML = whenHTML(pg.key);
 }
+// 回复后回到被回复的那篇：它所在的正文页
+function pageOfPost(id){
+  if (!id) return -1;
+  const mark = 'data-id="' + id + '"';
+  return pages.findIndex(p => p.type === 'text' && p.html && p.html.includes(mark));
+}
+function replyTargetOf(ev){
+  const tags = Array.isArray(ev.tags) ? ev.tags : [];
+  const hex = v => /^[0-9a-f]{64}$/.test(v || '') ? v : null;
+  if (ev.kind === 1111) return hex((tags.find(t => t[0] === 'e') || [])[1]);
+  const e = tags.find(t => t[0] === 'e' && t[3] === 'reply') || tags.find(t => t[0] === 'e' && t[3] === 'root');
+  return hex(e && e[1]);
+}
+let jumpToPostPending = null;
 function applyFresh(jumpToLatest = false){
   if (!fresh.length) return;
   if (jumpToLatest === true) jumpToLatestPending = true;
+  else if (jumpToLatest && jumpToLatest.post) jumpToPostPending = jumpToLatest.post;
   if (busy || loading){ applyPending = true; updateDot(); return; }
   applyPending = false;
-  const forceLatest = jumpToLatestPending;
-  jumpToLatestPending = false;
+  const forceLatest = jumpToLatestPending, target = jumpToPostPending;
+  jumpToLatestPending = false; jumpToPostPending = null;
   const prevIndex = idx, posts = fresh;
   fresh = [];
   posts.forEach(p => seen.add(p.id));
@@ -692,8 +719,9 @@ function applyFresh(jumpToLatest = false){
   days.forEach(paginateDay);
   if (exhausted) pages.push({ type:'end' });
   bar.hidden = true;
-  const latest = latestTextPage();
-  if (forceLatest && latest >= 0) show(latest);
+  const latest = latestTextPage(), at = pageOfPost(target);
+  if (at >= 0) show(at);
+  else if (forceLatest && latest >= 0) show(latest);
   else show(prevIndex <= 2 ? Math.min(Math.max(1,prevIndex), pages.length - 1) : Math.min(1,pages.length - 1));
   saveCache();
   updateDot();
@@ -1326,9 +1354,13 @@ window.addEventListener('nostr-book:published', e => {
   // Even a successfully published reply below the book's length threshold returns there.
   clearTimeout(flushTimer); flushTimer = null;
   bar.hidden = true;
-  if (fresh.length) applyFresh(true);
-  else { const latest = latestTextPage(); if (latest >= 0) show(latest); }
-  toast('发表成功');
+  const target = replyTargetOf(event);
+  if (fresh.length) applyFresh(target ? { post: target } : true);
+  else {
+    const at = pageOfPost(target), latest = latestTextPage();
+    if (at >= 0) show(at); else if (latest >= 0) show(latest);
+  }
+  toast(target ? '回复成功' : '发表成功');
 });
 reset();
 const ready = document.fonts ? document.fonts.ready : Promise.resolve();

@@ -1,4 +1,4 @@
-const CACHE = 'book-v32';
+const CACHE = 'book-v33';
 // 字体单独一个长期缓存：发新版时不清掉，免得每次更新都退回系统宋体、重新下载
 const FONT_CACHE = 'book-fonts-v1';
 const SHELL = ['./', 'index.html', 'writer.js', 'vendor/noble-secp256k1.js', 'manifest.json', 'icon-512.png'];
@@ -14,6 +14,12 @@ self.addEventListener('fetch', e => {
   if (u.host.endsWith('fonts.gstatic.com') || u.host.endsWith('fonts.googleapis.com')) {
     e.respondWith(caches.open(FONT_CACHE).then(async c => (await c.match(e.request)) ||
       fetch(e.request).then(r => { if (r.ok || r.type === 'opaque') c.put(e.request, r.clone()); return r; })));
+    return;
+  }
+  // 自带字体（Literata）：同样长期缓存，先用缓存
+  if (u.origin === location.origin && u.pathname.includes('/fonts/')) {
+    e.respondWith(caches.open(FONT_CACHE).then(async c => (await c.match(e.request)) ||
+      fetch(e.request).then(r => { if (r.ok) c.put(e.request, r.clone()); return r; })));
     return;
   }
   // 页面：先联网，断网时用缓存

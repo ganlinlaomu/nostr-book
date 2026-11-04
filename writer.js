@@ -18,7 +18,7 @@ const confirmPassInput = $('writerNewPassConfirm');
 const unlockPassInput = $('writerUnlockPass');
 let activePk = null;
 let replyCtx = null;
-let reactCtx = null;      // 「善 / 否」需要密码时借写作页解锁，不动草稿
+let reactCtx = null;      // 「甘 / 幹」需要密码时借写作页解锁，不动草稿
 let draftKey = null;      // 随笔草稿按 npub 存；每条回复各自一份草稿
 let saveTimer = null;
 let opBusy = false;
@@ -220,7 +220,7 @@ async function openWriter(ctx=null){
   if(ctx?.react){
     reactCtx=ctx;replyCtx=null;draftKey=null;activePk=pk;draftGeneration++;
     editor.hidden=true;editor.value='';showPanel(null);status.textContent='';saveHint.textContent='';
-    const mark=ctx.reaction==='-'?'否':'善';
+    const mark=ctx.reaction==='-'?'幹':'甘';
     $('writerQuote').hidden=false;$('writerQuoteWho').textContent='落「'+mark+'」于 '+(ctx.name||'')+'：';
     $('writerQuoteText').textContent='「'+(ctx.text||'')+'」';
     $('writerTitle').textContent=mark;publishButton.textContent='落印';
@@ -385,7 +385,7 @@ async function importKey(){
     setBusy(false);
   }
 }
-/* ---------- 签名与发送（随笔、回复、「善」共用） ---------- */
+/* ---------- 签名与发送（随笔、回复、「甘 / 幹」共用） ---------- */
 async function signEvent(pk,sk,event){
   const lib=await schnorr();
   if(b2h(lib.getPublicKey(sk))!==pk)throw Error('密钥与当前阅读账号不匹配');
@@ -402,7 +402,7 @@ async function broadcast(pk,event,extra){
   const result=await Promise.all(urls.map(url=>sendRelay(url,event)));
   return result.filter(r=>r.ok).length;
 }
-// NIP-25：「善」发送 "+"，「否」发送 "-"，e/p/k 指向原文
+// NIP-25：「甘」发送 "+"，「幹」发送 "-"，e/p/k 指向原文
 async function sendReaction(pk,ctx,sk){
   const hint=(ctx.relays||[]).map(safeRelay).find(Boolean)||'';
   const event={kind:7,created_at:Math.floor(Date.now()/1000),content:ctx.reaction==='-'?'-':'+',pubkey:pk,
